@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import uy.plomo.gateway.device.Device;
+import uy.plomo.gateway.homeassistant.camera.HomeAssistantCameraController;
 import uy.plomo.gateway.homeassistant.lock.LockCodeProvider;
 
 import java.util.LinkedHashMap;
@@ -27,19 +28,24 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class HomeAssistantController {
 
-    private final HomeAssistantInterface haInterface;
-    private final LockCodeProvider       lockCodeProvider;
+    private final HomeAssistantInterface        haInterface;
+    private final LockCodeProvider              lockCodeProvider;
+    private final HomeAssistantCameraController cameraController;
 
     // ── Summary view ──────────────────────────────────────────────────────────
 
     public Map<String, Object> parseDevice(String id, Device dev) {
+        String entityId = dev.getNode();
+        if (entityId != null && "camera".equals(domainOf(entityId))) {
+            return cameraController.parseDevice(id, dev);
+        }
+
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id",       id);
         out.put("protocol", "ha");
         out.put("name",     dev.getName());
         out.put("node",     dev.getNode());
 
-        String entityId = dev.getNode();
         if (entityId == null) {
             putOffline(out, dev);
             return out;
@@ -100,6 +106,9 @@ public class HomeAssistantController {
         String entityId = dev.getNode();
         if (entityId == null) return Map.of("error", "device has no Home Assistant entity id");
         String domain = domainOf(entityId);
+        if ("camera".equals(domain)) {
+            return cameraController.handleDeviceCommand(dev, cmd, method, body);
+        }
 
         return switch (cmd) {
             case "on"         -> callServiceSync(domain, "turn_on", entityId, null);
