@@ -292,22 +292,39 @@ Assistant service calls based on the entity's domain (`lock.*`, `light.*`, `swit
 
 #### Lock PIN codes
 
-PIN code management depends entirely on which Home Assistant integration owns the lock:
+PIN code management is resolved per-lock, live, based on which Home Assistant integration owns
+the entity (`HomeAssistantEntityRegistry`):
 
-- **Z-Wave JS** locks: fully supported, via `zwave_js.get_lock_usercode` / `set_lock_usercode` / `clear_lock_usercode`.
-- **ZHA** (Zigbee) locks: **not supported** — Home Assistant's ZHA integration has no PIN code
-  management service as of this writing ([zigpy/zha#729](https://github.com/zigpy/zha/issues/729),
-  still open). `GET`/`POST`/`DELETE /:dev/pincode/:slot` returns an explicit error for these
-  locks rather than silently failing. Manage codes from the lock's own keypad/app in the
-  meantime.
+- **Z-Wave JS** locks: fully supported, via `zwave_js.get_lock_usercode` / `set_lock_usercode` /
+  `clear_lock_usercode` — a clean, documented, per-lock API.
+- **ZHA** (Zigbee) locks: no dedicated service exists in Home Assistant
+  ([zigpy/zha#729](https://github.com/zigpy/zha/issues/729), still open), so this falls back to
+  `zha.issue_zigbee_cluster_command`, sending the DoorLock cluster's own
+  `SetPINCode`(0x05)/`GetPINCode`(0x06)/`ClearPINCode`(0x07) commands directly — the same
+  commands the old direct-radio code used to send over serial, just issued through HA instead.
+  **Set/delete should be reliable** (fire-and-forget commands); **get is best-effort** — its
+  response depends on the specific lock model's ZHA "quirk" correctly relaying the reply, and
+  real-world reports show this failing on some hardware. If it fails for your lock, the error
+  message says so explicitly rather than returning a fabricated code.
+- **Zigbee2MQTT** locks (via Home Assistant's generic MQTT integration + MQTT discovery — Z2M
+  isn't a native HA integration): no HA service either, so PIN codes are set by asking HA to
+  publish an MQTT message (`mqtt.publish`) to the device's own Z2M `.../set` topic, matching the
+  payload shape used by several Z2M-supported lock models. **Verify the exact payload fields
+  against your specific lock's page on zigbee2mqtt.io** — Z2M's PIN code payload isn't
+  perfectly uniform across all lock models the way Z-Wave JS's API is. Reading a code back
+  isn't implemented for this path (check the lock's state in Home Assistant or Z2M's own UI
+  instead).
 - Basic lock/unlock (`/:dev/lock`) works for any Home Assistant lock entity regardless of
   integration.
 - Weekday/yearday schedule restrictions (previously supported for direct Z-Wave/Zigbee locks)
   have no Home Assistant equivalent and are not implemented.
 
-This is a known, intentionally incomplete area — see `LockCodeProvider` in
-`homeassistant/lock/` for the extension point a future direct-to-lock fallback would plug into
-for integrations Home Assistant can't cover.
+If you're choosing a Zigbee stack and lock PIN codes matter, Zigbee2MQTT's per-model device
+support is generally more mature for this than ZHA's generic raw-command fallback — worth
+weighing if you're not already committed to ZHA.
+
+See `LockCodeProvider` in `homeassistant/lock/` for the extension point a future direct-to-lock
+fallback (bypassing Home Assistant entirely) would plug into for gaps none of the above cover.
 
 ---
 
