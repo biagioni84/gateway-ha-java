@@ -98,14 +98,20 @@ public class GatewayApiService {
 
     // ── Inclusion / Exclusion ─────────────────────────────────────────────────
 
+    // NOTE: as of the Home Assistant migration, these two dispatch to HomeAssistantController
+    // rather than the direct-radio zwaveController/zigbeeController — inclusion/exclusion have
+    // no meaningful way to run against "the real radio" and "HA" side by side for the same
+    // protocol value, unlike getSummary/getDevice/handleDeviceCommand which stay additive via
+    // the separate "ha" Device.protocol case. See the migration plan (M4) for the verified
+    // per-integration API shapes this routes to.
     public Map<String, Object> inclusion(String protocol, String command, boolean blocking,
                                          Map<String, Object> body) {
         if (protocol == null || command == null)
             return Map.of("error", "protocol and command are required");
         return switch (protocol) {
-            case "zwave"  -> zwaveController.inclusion(command, blocking);
-            case "zigbee" -> zigbeeController.inclusion(command);
-            case "matter" -> commissionMatterDevice(str(body, "code"));
+            case "zwave"  -> haController.zwaveInclusion(command, blocking);
+            case "zigbee" -> haController.zigbeeInclusion(command);
+            case "matter" -> haController.matterInclusion();
             default       -> Map.of("error", "unknown protocol: " + protocol);
         };
     }
@@ -114,7 +120,9 @@ public class GatewayApiService {
         if (protocol == null || command == null)
             return Map.of("error", "protocol and command are required");
         return switch (protocol) {
-            case "zwave"  -> zwaveController.exclusion(command, blocking);
+            case "zwave"  -> haController.zwaveExclusion(command, blocking);
+            case "zigbee" -> haController.zigbeeExclusion();
+            case "matter" -> Map.of("error", "exclusion not supported for matter — remove the device via DELETE /:dev or the Home Assistant UI");
             default       -> Map.of("error", "exclusion not supported for: " + protocol);
         };
     }

@@ -188,6 +188,94 @@ public class HomeAssistantController {
         }
     }
 
+    // ── Network-level inclusion / exclusion ──────────────────────────────────
+    //
+    // Routed per the `protocol` request field, which now selects which HA integration's
+    // pairing flow to drive instead of talking to a radio directly:
+    //   zwave  -> Z-Wave JS: NOT a call_service action -- a dedicated WS command namespace
+    //             (zwave_js/add_node, zwave_js/remove_node, .../stop_inclusion,
+    //             .../stop_exclusion) that requires the integration's config entry_id.
+    //             Verified against home-assistant/core's zwave_js/api.py (2026-08).
+    //   zigbee -> ZHA: a normal service, zha.permit (duration, default 60s). ZHA has no
+    //             service to close the join window early, and zha.remove requires a
+    //             specific device's ieee upfront (no network-wide "exclusion mode" the
+    //             way Z-Wave/legacy Zigbee had) -- flagged below rather than guessed at.
+    //   matter -> Home Assistant's Matter integration commissions devices through the
+    //             interactive config-entry flow API, not a single RPC -- no headless
+    //             equivalent was found. Falls back to a "commission via the HA UI" response
+    //             per the migration plan's documented fallback.
+
+    private static final String ZWAVE_JS_DOMAIN = "zwave_js";
+    private static final String ZHA_DOMAIN      = "zha";
+
+    public Map<String, Object> zwaveInclusion(String command, boolean blocking) {
+        String entryId = resolveConfigEntryId(ZWAVE_JS_DOMAIN);
+        if (entryId == null) return Map.of("error", "no zwave_js integration configured in Home Assistant");
+        return switch (command) {
+            // "start_s2" is not yet distinguished from "start" -- selecting an explicit S2
+            // inclusion_strategy needs its wire-format enum value verified against the
+            // target HA version before being sent; degrading to HA's default is safer than
+            // guessing wrong and silently failing.
+            case "start", "start_s2" -> sendZwaveJsCommand("zwave_js/add_node", Map.of("entry_id", entryId));
+            case "stop"              -> sendZwaveJsCommand("zwave_js/stop_inclusion", Map.of("entry_id", entryId));
+            default -> Map.of("error", "unknown zwave inclusion command: " + command);
+        };
+    }
+
+    public Map<String, Object> zwaveExclusion(String command, boolean blocking) {
+        String entryId = resolveConfigEntryId(ZWAVE_JS_DOMAIN);
+        if (entryId == null) return Map.of("error", "no zwave_js integration configured in Home Assistant");
+        return switch (command) {
+            case "start" -> sendZwaveJsCommand("zwave_js/remove_node", Map.of("entry_id", entryId));
+            case "stop"  -> sendZwaveJsCommand("zwave_js/stop_exclusion", Map.of("entry_id", entryId));
+            default -> Map.of("error", "unknown zwave exclusion command: " + command);
+        };
+    }
+
+    public Map<String, Object> zigbeeInclusion(String command) {
+        if ("stop".equals(command)) {
+            return Map.of("status", "not_supported",
+                    "message", "ZHA has no service to close the join window early — it closes automatically after the permit duration");
+        }
+        return callServiceSync(ZHA_DOMAIN, "permit", null, Map.of("duration", 60));
+    }
+
+    public Map<String, Object> zigbeeExclusion() {
+        return Map.of("status", "not_supported",
+                "message", "ZHA requires a specific device's ieee address to remove it — use DELETE /:dev instead of network-level exclusion");
+    }
+
+    public Map<String, Object> matterInclusion() {
+        return Map.of("status", "manual",
+                "message", "Automatic Matter commissioning via this API is not yet supported — commission the device from "
+                        + "the Home Assistant UI (Settings > Devices & services > Matter) or the Matter Server add-on's web UI; "
+                        + "it will appear here automatically once commissioned");
+    }
+
+    private String resolveConfigEntryId(String domain) {
+        try {
+            JsonNode result = haInterface.sendCommandWait("config_entries/get", Map.of("domain", domain))
+                    .orTimeout(10, TimeUnit.SECONDS).join();
+            if (result != null && result.isArray() && !result.isEmpty()) {
+                return result.get(0).path("entry_id").asText(null);
+            }
+        } catch (Exception e) {
+            log.warn("Home Assistant: failed to resolve config entry for domain '{}': {}", domain, e.getMessage());
+        }
+        return null;
+    }
+
+    private Map<String, Object> sendZwaveJsCommand(String type, Map<String, Object> fields) {
+        try {
+            haInterface.sendCommandWait(type, fields).orTimeout(15, TimeUnit.SECONDS).join();
+            return Map.of("status", "ok");
+        } catch (Exception e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            log.warn("Home Assistant: command '{}' failed: {}", type, cause.getMessage());
+            return Map.of("error", cause.getMessage() != null ? cause.getMessage() : "command failed");
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static String domainOf(String entityId) {
