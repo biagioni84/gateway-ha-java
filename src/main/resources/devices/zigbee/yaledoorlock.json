@@ -1,0 +1,22 @@
+{
+  "protocol": "zigbee",
+  "type": "lock",
+  "manufacturer": "Yale",
+  "modelId": "YRD226 TSDB",
+  "interview": [
+    {"cluster": "PowerConfiguration", "attributes": ["BatteryPercentageRemaining", "BatteryAlarmState"]},
+    {"cluster": "DoorLock",           "attributes": ["LockState"]}
+  ],
+  "bindings": [
+    {"sep": "01", "dep": "01", "cluster": "0x0001"},
+    {"sep": "01", "dep": "01", "cluster": "0x0101"},
+    {"sep": "01", "dep": "01", "cluster": "0x0009"}
+  ],
+  "reporting": [
+    {"sep": "01", "dep": "01", "cluster": "PowerConfiguration", "attribute": "BatteryPercentageRemaining", "minTime": 300, "maxTime": 3600, "delta": "01"},
+    {"sep": "01", "dep": "01", "cluster": "DoorLock",           "attribute": "LockState",                  "minTime": 1,   "maxTime": 300,  "delta": "01"}
+  ],
+  "init": [
+    {"fn": "poll-pincodes", "params": {"start": 1, "end": 10}}
+  ]
+}

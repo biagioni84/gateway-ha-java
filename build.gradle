@@ -1,0 +1,94 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.0.2'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'uy.plomo'
+version = '0.0.1-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    // SQLite
+    runtimeOnly 'org.xerial:sqlite-jdbc:3.47.2.0'
+    implementation 'org.hibernate.orm:hibernate-community-dialects'
+
+    // AWS IoT MQTT5 (mTLS — gateway uses direct cert auth)
+    implementation 'software.amazon.awssdk.iotdevicesdk:aws-iot-device-sdk:1.30.0'
+
+    // Z-Wave lib (composite build)
+    implementation 'uy.plomo:zwave-lib:0.1.0'
+
+    // OpenAPI / Swagger UI
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.1'
+
+    // WebSocket client (Matter server)
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+
+    // JSON
+    implementation 'org.json:json:20240303'
+    // Jackson compat layer (com.fasterxml namespace). Version managed by Spring Boot BOM.
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+    // Spring Security
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+
+    // JWT
+    implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
+    runtimeOnly    'io.jsonwebtoken:jjwt-impl:0.12.6'
+    runtimeOnly    'io.jsonwebtoken:jjwt-jackson:0.12.6'
+
+    // Eclipse Paho MQTT client (local broker — audio inference service)
+    implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
+
+    // Lombok
+    compileOnly 'org.projectlombok:lombok:1.18.30'
+    annotationProcessor 'org.projectlombok:lombok:1.18.30'
+
+    // Test
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+jar {
+    enabled = true
+    archiveClassifier = 'lean'
+    manifest {
+        attributes(
+                'Main-Class': 'uy.plomo.gateway.GatewayApplication',
+                'Class-Path': configurations.runtimeClasspath.files.collect { "lib/" + it.name }.join(' ')
+        )
+    }
+}
+
+tasks.register('copyDependencies', Copy) {
+    description = 'Copies all runtime dependencies to build/libs/lib'
+    group = 'build'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from configurations.runtimeClasspath
+    into "${layout.buildDirectory.get()}/libs/lib"
+}
+
+tasks.named('build') {
+    finalizedBy(copyDependencies)
+}
+
+bootJar {
+    enabled = false
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

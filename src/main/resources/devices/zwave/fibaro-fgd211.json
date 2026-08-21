@@ -1,0 +1,36 @@
+{
+  "protocol": "zwave",
+  "type": "dimmer",
+  "label": "Dimmer 2",
+  "description": "Fibaro Dimmer 2",
+  "manufacturer": "Fibaro",
+  "manufacturerId": "0x010f",
+  "devices": [
+    {"productType": "0x0100", "productId": "0x100a"}
+  ],
+  "associations": {
+    "1": {"label": "Lifeline",      "maxNodes": 1, "isLifeline": false},
+    "2": {"label": "Switch 1",      "maxNodes": 5, "isLifeline": false},
+    "3": {"label": "Dimmer 1",      "maxNodes": 5, "isLifeline": true},
+    "4": {"label": "Switch 2",      "maxNodes": 5, "isLifeline": false},
+    "5": {"label": "Dimmer 2",      "maxNodes": 5, "isLifeline": false}
+  },
+  "interview": [
+    {"class": "SWITCH_MULTILEVEL", "cmd": "SWITCH_MULTILEVEL_GET"}
+  ],
+  "paramInformation": [
+    {"#": "1",  "label": "Minimum brightness level", "valueSize": 1, "minValue": 1,  "maxValue": 98,  "defaultValue": 1,  "unit": "%"},
+    {"#": "2",  "label": "Maximum brightness level", "valueSize": 1, "minValue": 2,  "maxValue": 99,  "defaultValue": 99, "unit": "%"},
+    {"#": "3",  "label": "Incandescence level",      "valueSize": 1, "minValue": 0,  "maxValue": 99,  "defaultValue": 0,  "unit": "%"},
+    {"#": "4",  "label": "Incandescence time",       "valueSize": 2, "minValue": 0,  "maxValue": 255, "defaultValue": 0,  "unit": "100ms"},
+    {"#": "5",  "label": "Dimming step size (auto)", "valueSize": 1, "minValue": 1,  "maxValue": 99,  "defaultValue": 1,  "unit": "%"},
+    {"#": "6",  "label": "Dimming step time (auto)", "valueSize": 2, "minValue": 0,  "maxValue": 255, "defaultValue": 1,  "unit": "10ms"},
+    {"#": "7",  "label": "Dimming step size (manual)","valueSize": 1,"minValue": 1,  "maxValue": 99,  "defaultValue": 1,  "unit": "%"},
+    {"#": "8",  "label": "Dimming step time (manual)","valueSize": 2,"minValue": 0,  "maxValue": 255, "defaultValue": 5,  "unit": "10ms"},
+    {"#": "9",  "label": "Save last state",           "valueSize": 1,"minValue": 0,  "maxValue": 1,   "defaultValue": 1,
+     "options": [{"label": "No", "value": 0}, {"label": "Yes", "value": 1}]},
+    {"#": "10", "label": "Timer function",            "valueSize": 1,"minValue": 0,  "maxValue": 1,   "defaultValue": 0}
+  ],
+  "configuration": [],
+  "init": []
+}

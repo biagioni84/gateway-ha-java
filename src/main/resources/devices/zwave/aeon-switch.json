@@ -1,0 +1,25 @@
+{
+  "protocol": "zwave",
+  "type": "switch",
+  "label": "Smart Energy Switch",
+  "description": "Aeon Labs Smart Energy Switch",
+  "manufacturer": "Aeon Labs",
+  "manufacturerId": "0x0086",
+  "devices": [
+    {"productType": "0x0003", "productId": "0x001a"}
+  ],
+  "associations": {
+    "1": {"label": "Lifeline", "maxNodes": 5, "isLifeline": true}
+  },
+  "interview": [
+    {"class": "BASIC", "cmd": "BASIC_GET"}
+  ],
+  "paramInformation": [
+    {"#": "50", "label": "Enable LED blinking", "valueSize": 1, "minValue": 0, "maxValue": 2, "defaultValue": 0,
+     "options": [{"label": "Disabled", "value": 0}, {"label": "Night light", "value": 1}, {"label": "Energy mode", "value": 2}]}
+  ],
+  "configuration": [
+    {"param": "50", "value": ["02"]}
+  ],
+  "init": []
+}

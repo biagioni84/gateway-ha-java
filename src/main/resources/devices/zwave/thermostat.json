@@ -1,0 +1,29 @@
+{
+  "protocol": "zwave",
+  "type": "thermostat",
+  "label": "Z-Wave Thermostat",
+  "manufacturer": "Stelpro",
+  "manufacturerId": "0x014f",
+  "devices": [
+    {"productType": "0x5400", "productId": "0x5437"}
+  ],
+  "associations": {
+    "1": {"label": "Lifeline", "maxNodes": 5, "isLifeline": true}
+  },
+  "interview": [
+    {"class": "BATTERY",             "cmd": "BATTERY_GET"},
+    {"class": "THERMOSTAT_SETPOINT", "cmd": "THERMOSTAT_SETPOINT_GET", "data": ["01"]},
+    {"class": "THERMOSTAT_SETPOINT", "cmd": "THERMOSTAT_SETPOINT_GET", "data": ["02"]},
+    {"class": "SENSOR_MULTILEVEL",   "cmd": "SENSOR_MULTILEVEL_GET"},
+    {"class": "THERMOSTAT_FAN_MODE", "cmd": "THERMOSTAT_FAN_MODE_GET"},
+    {"class": "THERMOSTAT_MODE",     "cmd": "THERMOSTAT_MODE_GET"}
+  ],
+  "paramInformation": [
+    {"#": "1",  "label": "Temperature display units", "valueSize": 1, "minValue": 0, "maxValue": 1, "defaultValue": 0,
+     "options": [{"label": "Celsius", "value": 0}, {"label": "Fahrenheit", "value": 1}]},
+    {"#": "2",  "label": "HVAC type", "valueSize": 1, "minValue": 0, "maxValue": 1, "defaultValue": 0,
+     "options": [{"label": "Normal", "value": 0}, {"label": "Heat pump", "value": 1}]}
+  ],
+  "configuration": [],
+  "init": []
+}

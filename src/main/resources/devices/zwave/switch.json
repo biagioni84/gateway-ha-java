@@ -1,0 +1,15 @@
+{
+  "protocol": "zwave",
+  "type": "switch",
+  "label": "Binary Switch",
+  "generic": "10",
+  "specific": "01",
+  "associations": {
+    "1": {"label": "Lifeline", "maxNodes": 5, "isLifeline": true}
+  },
+  "interview": [
+    {"class": "BASIC", "cmd": "BASIC_GET"}
+  ],
+  "configuration": [],
+  "init": []
+}

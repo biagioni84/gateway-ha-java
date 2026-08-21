@@ -1,0 +1,44 @@
+{
+  "protocol": "zwave",
+  "type": "lock",
+  "manufacturer": "ASSA ABLOY",
+  "label": "YRD226",
+  "description": "Yale Real Living Assure Lock Touch Screen Deadbolt",
+  "manufacturerId": "0x0129",
+  "devices": [
+    {"productType": "0x0002", "productId": "0x0600"}
+  ],
+  "associations": {
+    "1": {"label": "Lifeline", "maxNodes": 5, "isLifeline": true}
+  },
+  "paramInformation": [
+    {"#": "1",  "label": "Volume",              "valueSize": 1, "minValue": 1, "maxValue": 3, "defaultValue": 1, "options": [{"label": "Loud", "value": 1}, {"label": "Quiet", "value": 2}, {"label": "Silent", "value": 3}]},
+    {"#": "2",  "label": "Auto-relock",         "valueSize": 1, "minValue": 0, "maxValue": 255, "defaultValue": 0},
+    {"#": "3",  "label": "Auto-relock delay",   "valueSize": 1, "minValue": 5, "maxValue": 255, "defaultValue": 30, "unit": "seconds"},
+    {"#": "7",  "label": "Operation mode",      "valueSize": 1, "minValue": 0, "maxValue": 4, "defaultValue": 0},
+    {"#": "8",  "label": "One touch locking",   "valueSize": 1, "minValue": 0, "maxValue": 1, "defaultValue": 0},
+    {"#": "11", "label": "Wrong code attempts", "valueSize": 1, "minValue": 1, "maxValue": 7, "defaultValue": 5},
+    {"#": "12", "label": "Shutdown time",       "valueSize": 1, "minValue": 1, "maxValue": 127, "defaultValue": 30, "unit": "seconds"},
+    {"#": "13", "label": "Lock status LED",     "valueSize": 1, "minValue": 0, "maxValue": 1, "defaultValue": 0},
+    {"#": "15", "label": "Reset to factory",    "valueSize": 1, "minValue": 1, "maxValue": 1, "defaultValue": 1, "writeOnly": true}
+  ],
+  "interview": [
+    {"class": "DOOR_LOCK", "cmd": "DOOR_LOCK_OPERATION_GET"},
+    {"class": "BATTERY",   "cmd": "BATTERY_GET"}
+  ],
+  "configuration": [
+    {"param": "02", "value": ["FF"]},
+    {"param": "03", "value": null}
+  ],
+  "init": [
+    {"fn": "poll-pincodes", "params": {"start": 1, "end": 15}},
+    {"fn": "config-time",   "params": {}}
+  ],
+  "metadata": {
+    "wakeup": "Touch the keypad to wake the lock",
+    "inclusion": "Put the controller in inclusion mode, then enter the programming code followed by #",
+    "exclusion": "Put the controller in exclusion mode, then enter the programming code followed by #",
+    "reset": "Remove the battery cover, press and hold the reset button for 3 seconds",
+    "manual": "https://www.yalehome.com/en/yale/yalehome/products/yale-real-living/locks/assure-lock/"
+  }
+}
