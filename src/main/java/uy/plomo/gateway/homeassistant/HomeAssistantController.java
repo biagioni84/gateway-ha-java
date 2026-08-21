@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import uy.plomo.gateway.device.Device;
+import uy.plomo.gateway.homeassistant.lock.LockCodeProvider;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -27,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 public class HomeAssistantController {
 
     private final HomeAssistantInterface haInterface;
+    private final LockCodeProvider       lockCodeProvider;
 
     // ── Summary view ──────────────────────────────────────────────────────────
 
@@ -107,7 +109,7 @@ public class HomeAssistantController {
             case "level"      -> handleLevel(entityId, body);
             case "lock"       -> handleLock(entityId, method, body);
             case "thermostat" -> handleThermostat(entityId, body);
-            case "pincode"    -> Map.of("error", "pincode management not yet implemented for Home Assistant-backed locks");
+            case "pincode"    -> handlePincode(entityId, subId, method, body);
             case "service"    -> handleServicePassthrough(entityId, body);
             default -> Map.of("error", "unknown command: " + cmd);
         };
@@ -161,6 +163,26 @@ public class HomeAssistantController {
             return callServiceSync("climate", "set_hvac_mode", entityId, Map.of("hvac_mode", body.get("mode")));
         }
         return Map.of("status", "ok");
+    }
+
+    private Map<String, Object> handlePincode(String entityId, String subId, String method, Map<String, Object> body) {
+        if (subId == null) return Map.of("error", "pincode slot is required");
+        int slot;
+        try {
+            slot = Integer.parseInt(subId);
+        } catch (NumberFormatException e) {
+            return Map.of("error", "invalid pincode slot: " + subId);
+        }
+        return switch (method) {
+            case "GET"    -> lockCodeProvider.getUserCode(entityId, slot);
+            case "POST"   -> {
+                Object code = body != null ? body.get("code") : null;
+                if (code == null) yield Map.of("error", "code is required");
+                yield lockCodeProvider.setUserCode(entityId, slot, String.valueOf(code));
+            }
+            case "DELETE" -> lockCodeProvider.deleteUserCode(entityId, slot);
+            default -> Map.of("error", "unsupported method for pincode: " + method);
+        };
     }
 
     /** Generic escape hatch: {domain, service, data?, entity_id?} — calls any HA service directly. */

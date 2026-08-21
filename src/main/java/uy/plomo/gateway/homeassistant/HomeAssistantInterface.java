@@ -326,11 +326,22 @@ public class HomeAssistantInterface extends TextWebSocketHandler {
      */
     public CompletableFuture<JsonNode> callService(
             String domain, String service, String entityId, Map<String, Object> serviceData) {
+        return callService(domain, service, entityId, serviceData, false);
+    }
+
+    /**
+     * Same as {@link #callService(String, String, String, Map)}, but when returnResponse is true,
+     * sets return_response so the completed future's result carries the service's response data
+     * under the "response" key (e.g. zwave_js.get_lock_usercode) instead of just an ack.
+     */
+    public CompletableFuture<JsonNode> callService(
+            String domain, String service, String entityId, Map<String, Object> serviceData, boolean returnResponse) {
         Map<String, Object> fields = new LinkedHashMap<>();
         fields.put("domain", domain);
         fields.put("service", service);
         if (entityId != null) fields.put("target", Map.of("entity_id", entityId));
         if (serviceData != null && !serviceData.isEmpty()) fields.put("service_data", serviceData);
+        if (returnResponse) fields.put("return_response", true);
         return sendCommandWait("call_service", fields);
     }
 
