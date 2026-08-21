@@ -10,15 +10,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Persistent representation of a Z-Wave or Zigbee device.
+ * Persistent representation of a device the gateway knows about.
  *
  * Key fields (indexed for fast lookup):
- *   node     — hex string used by both protocols, e.g. "0x38E4"
- *   ieeeAddr — 64-bit Zigbee EUI-64, e.g. "0015BC002F009BD9"
- *   protocol — "zwave" | "zigbee"
+ *   node     — the Home Assistant entity_id, e.g. "lock.front_door"
+ *   protocol — "ha" for everything backed by Home Assistant (including cameras)
+ *   ieeeAddr — unused by protocol "ha"; kept for old rows from before the Home Assistant migration
  *
  * Nested data stored as JSON TEXT columns:
- *   attributes — {cluster → {attrName → value}}
+ *   attributes — {domain → {attrName → value}}
  *   pincodes   — {userId  → code}
  *   fwdEvents  — [eventName, ...]
  */
@@ -34,13 +34,13 @@ public class Device {
     @Id
     private String id;
 
-    private String protocol;    // "zwave" | "zigbee"
+    private String protocol;    // "ha"
     private String name;
 
-    private String node;        // e.g. "0x38E4"  (zwave + zigbee)
+    private String node;        // Home Assistant entity_id, e.g. "lock.front_door"
 
     @Column(name = "ieee_addr")
-    private String ieeeAddr;    // e.g. "0015BC002F009BD9"  (zigbee only)
+    private String ieeeAddr;    // unused by protocol "ha" — retained for old pre-migration rows
 
     private String manufacturer;
 
@@ -77,7 +77,7 @@ public class Device {
     private Map<String, String> pincodes = new HashMap<>();
 
     /**
-     * Endpoint definitions for Zigbee devices (stored as opaque JSON list).
+     * Event names this device should forward to the cloud as telemetry (e.g. "*", "state").
      */
     @Column(columnDefinition = "TEXT")
     @Convert(converter = JsonConverter.StringList.class)

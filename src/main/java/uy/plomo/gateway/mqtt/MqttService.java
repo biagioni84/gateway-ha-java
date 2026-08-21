@@ -296,8 +296,8 @@ public class MqttService {
     }
 
     /**
-     * Publish an unsolicited event (Z-Wave/Zigbee device report).
-     * Called by ZWaveInterface and ZigbeeInterface when a device sends data.
+     * Publish an unsolicited event (device report).
+     * Called by report handlers when a device sends data.
      *
      * @param eventPayload serializable object; will be JSON-encoded
      */

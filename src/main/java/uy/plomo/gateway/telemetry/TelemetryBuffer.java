@@ -15,8 +15,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * Accumulates telemetry events from all protocols and flushes them to MQTT
  * as a single batch on a configurable interval.
  *
- * Events are added concurrently from multiple threads (Z-Wave reader, Zigbee reader,
- * Matter WebSocket thread). The flush drains the queue atomically.
+ * Events are added concurrently from multiple threads (e.g. the Home Assistant WebSocket
+ * client's event executor). The flush drains the queue atomically.
  *
  * Publish topic: iot/v1/{name}/telemetry/{timestamp}
  * Payload: { "events": [ {...}, ... ] }

@@ -28,13 +28,10 @@ dependencies {
     // AWS IoT MQTT5 (mTLS — gateway uses direct cert auth)
     implementation 'software.amazon.awssdk.iotdevicesdk:aws-iot-device-sdk:1.30.0'
 
-    // Z-Wave lib (composite build)
-    implementation 'uy.plomo:zwave-lib:0.1.0'
-
     // OpenAPI / Swagger UI
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.1'
 
-    // WebSocket client (Matter server)
+    // WebSocket client (Home Assistant Core API)
     implementation 'org.springframework.boot:spring-boot-starter-websocket'
 
     // JSON

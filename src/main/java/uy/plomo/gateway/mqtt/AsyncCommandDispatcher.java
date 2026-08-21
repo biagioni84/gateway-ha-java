@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
  *
  * MqttService (on AwsEventLoop) calls dispatch() and returns immediately.
  * Spring submits the work to the "gatewayExecutor" thread pool where blocking
- * Z-Wave / Zigbee / Matter calls are safe to execute.
+ * Home Assistant calls are safe to execute.
  */
 @Component
 @Slf4j

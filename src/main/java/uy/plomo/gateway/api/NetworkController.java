@@ -4,7 +4,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
-import uy.plomo.gateway.zwave.ZWaveController;
 
 import java.util.Map;
 
@@ -24,7 +23,6 @@ import java.util.Map;
 public class NetworkController {
 
     private final GatewayApiService api;
-    private final ZWaveController   zwaveController;
 
     @Operation(summary = "Gateway summary", description = "Returns gateway info, firmware version, timezone and all paired devices with their current state.")
     @GetMapping("/summary")
@@ -39,7 +37,7 @@ public class NetworkController {
         return api.inclusion(api.str(body, "protocol"), api.str(body, "command"), api.bool(body, "blocking"), body);
     }
 
-    @Operation(summary = "Start/stop exclusion mode (Z-Wave only)", description = "Body: { \"protocol\": \"zwave\", \"command\": \"start\"|\"stop\", \"blocking\": false }")
+    @Operation(summary = "Start/stop exclusion mode", description = "Body: { \"protocol\": \"zwave\"|\"zigbee\"|\"matter\", \"command\": \"start\"|\"stop\", \"blocking\": false }. Only zwave is fully supported — see README.")
     @PostMapping("/exclude")
     public Map<String, Object> exclude(@RequestBody(required = false) Map<String, Object> body) {
         if (body == null) body = Map.of();
@@ -78,28 +76,5 @@ public class NetworkController {
     @GetMapping("/test")
     public Map<String, Object> testGet() {
         return api.handleTest(Map.of("cmd", "ping"));
-    }
-
-    /** Set association group on a node. POST /zwave/association/{nodeId}  { "group": 1 } */
-    @PostMapping("/zwave/association/{nodeId}")
-    public Map<String, Object> zwaveAssociation(
-            @PathVariable String nodeId,
-            @RequestBody(required = false) Map<String, Object> body) {
-        if (body == null) body = Map.of();
-        return api.handleZwaveNetwork("association/" + nodeId, "POST", body);
-    }
-
-    /** Trigger a full Z-Wave interview for a node by its decimal or hex ID.
-     *  POST /zwave/interview/42  or  POST /zwave/interview/0x2A */
-    @PostMapping("/zwave/interview/{nodeId}")
-    public Map<String, Object> zwaveInterview(@PathVariable String nodeId) {
-        try {
-            int id = nodeId.startsWith("0x") || nodeId.startsWith("0X")
-                    ? Integer.parseUnsignedInt(nodeId.substring(2), 16)
-                    : Integer.parseInt(nodeId);
-            return zwaveController.interview(id);
-        } catch (NumberFormatException e) {
-            return Map.of("error", "invalid nodeId: " + nodeId);
-        }
     }
 }
