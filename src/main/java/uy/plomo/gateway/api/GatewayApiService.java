@@ -10,6 +10,7 @@ import uy.plomo.gateway.platform.PlatformService;
 import uy.plomo.gateway.sequence.Sequence;
 import uy.plomo.gateway.sequence.SequenceService;
 import uy.plomo.gateway.camera.CameraController;
+import uy.plomo.gateway.homeassistant.HomeAssistantController;
 import uy.plomo.gateway.matter.MatterController;
 import uy.plomo.gateway.matter.MatterInterface;
 import uy.plomo.gateway.matter.MatterNode;
@@ -47,6 +48,7 @@ public class GatewayApiService {
     private final MatterController matterController;
     private final MatterInterface  matterInterface;
     private final CameraController cameraController;
+    private final HomeAssistantController haController;
     private final OtaService       otaService;
     private final DeviceService    deviceService;
     private final SequenceService  sequenceService;
@@ -68,6 +70,7 @@ public class GatewayApiService {
                 case "zigbee" -> zigbeeController.parseDevice(id, dev);
                 case "matter" -> matterController.parseDevice(id, dev);
                 case "camera" -> cameraController.parseDevice(id, dev);
+                case "ha"     -> haController.parseDevice(id, dev);
                 default       -> Map.of("id", id);
             };
             devices.put(id, parsed);
@@ -136,6 +139,7 @@ public class GatewayApiService {
             case "zigbee" -> zigbeeController.parseDevice(devId, dev);
             case "matter" -> matterController.parseDevice(devId, dev);
             case "camera" -> cameraController.parseDevice(devId, dev);
+            case "ha"     -> haController.parseDevice(devId, dev);
             default       -> Map.of("id", devId);
         };
     }
@@ -229,6 +233,7 @@ public class GatewayApiService {
             case "zigbee" -> zigbeeController.handleDeviceCommand(dev, cmd, subId, method, body);
             case "matter" -> handleMatterDeviceCommand(dev, cmd, method, body);
             case "camera" -> cameraController.handleDeviceCommand(dev, cmd, method, body);
+            case "ha"     -> haController.handleDeviceCommand(dev, cmd, subId, method, body);
             default       -> Map.of("error", "unknown protocol: " + proto);
         };
     }
