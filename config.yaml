@@ -1,0 +1,34 @@
+name: "Plomo Gateway"
+version: "0.1.0"
+slug: "plomo_gateway"
+description: "AWS IoT <-> Home Assistant bridge gateway (mTLS MQTT + local REST API)"
+url: "https://github.com/biagioni84/gateway-ha-java"
+arch:
+  - amd64
+  - aarch64
+startup: services
+boot: auto
+init: false
+map:
+  - data:rw
+# Exposed so /setup.html (AWS IoT provisioning, see README) is reachable — everything else the
+# gateway does goes out over MQTT, this port isn't needed for normal operation once provisioned.
+ports:
+  9098/tcp: 9098
+ports_description:
+  9098/tcp: "Gateway REST API / provisioning UI (/setup.html)"
+environment:
+  GATEWAY_DEPLOYMENT_MODE: container
+  # server.address defaults to 127.0.0.1, which would make the port above unreachable even
+  # though it's published (a loopback-bound socket doesn't accept traffic from outside the
+  # container's network namespace). The container boundary is already what 127.0.0.1 provides
+  # on bare-metal, so this isn't a security downgrade.
+  SERVER_ADDRESS: "0.0.0.0"
+options:
+  auth_username: admin
+  auth_password: changeme
+  log_level: INFO
+schema:
+  auth_username: str
+  auth_password: str
+  log_level: list(TRACE|DEBUG|INFO|WARN|ERROR)

@@ -101,6 +101,42 @@ Run the thin JAR:
 java -jar build/libs/gateway-0.0.1-SNAPSHOT-lean.jar
 ```
 
+This is the only deployment mode with working MQTT-triggered OTA (see `OTA.md`) — it requires
+systemd. The two modes below are containerized and have OTA disabled (see "Container mode" in
+`OTA.md`); updates there come from the add-on store or `docker pull` + recreate instead.
+
+---
+
+## Running as a Home Assistant add-on
+
+This repo doubles as a local-build HA add-on repository (`config.yaml`/`repository.yaml` at the
+root, `Dockerfile` builds the whole project — no pre-published image, no registry needed):
+
+1. In Home Assistant: **Settings → Add-ons → Add-on store → ⋮ → Repositories**, add this repo's
+   URL.
+2. Install "Plomo Gateway" from the store — the Supervisor clones the repo and builds the
+   `Dockerfile` on-device (amd64 and aarch64 supported).
+3. Start it. `HomeAssistantConnectionConfig` auto-detects Supervisor mode via `SUPERVISOR_TOKEN` —
+   no HA URL/token configuration needed.
+4. Open `http://<host>:9098/setup.html` to load the AWS IoT endpoint and device certificate (see
+   [Provisioning](#provisioning)) — the add-on doesn't expose AWS IoT settings in its options,
+   this is the only way to provision it.
+5. Auth username/password and log level are configurable from the add-on's **Configuration** tab
+   in the HA UI (mapped from `config.yaml`'s `options`).
+
+## Running as a standalone Docker container
+
+For a Home Assistant that's itself just a Docker container (no Supervisor/HAOS) — see
+`docker-compose.standalone.example.yml` for a full example. Key points:
+
+- Set `HOMEASSISTANT_URL`/`HOMEASSISTANT_TOKEN` env vars (standalone mode — see below).
+- Mount a volume at `/data` (where `gateway.db`, `provisioned.creds`, etc. live — same convention
+  the add-on uses for its persistent storage).
+- `server.address` still defaults to `127.0.0.1`; set `SERVER_ADDRESS=0.0.0.0` if you need
+  `/setup.html` or the REST API reachable from the host (the container's own network isolation is
+  the boundary that `127.0.0.1` provides on bare-metal, so this isn't a security downgrade).
+- Provision AWS IoT credentials the same way as the add-on: `/setup.html` after startup.
+
 ---
 
 ## Configuration
@@ -123,6 +159,7 @@ All configuration lives in `src/main/resources/application.properties`. Override
 | `gateway.auth.jwt.secret` | *(blank)* | JWT signing secret — random generated on startup if blank |
 | `gateway.auth.jwt.expiry.hours` | `24` | JWT token lifetime in hours |
 | `gateway.creds.path` | `./provisioned.creds` | Path to provisioning credentials |
+| `gateway.deployment.mode` | `bare-metal` | Set to `container` (done automatically by the Dockerfile) to disable OTA — see `OTA.md` |
 
 ### Home Assistant connection modes
 
