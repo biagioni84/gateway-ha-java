@@ -111,7 +111,7 @@ All configuration lives in `src/main/resources/application.properties`. Override
 | `server.port` | `9098` | HTTP port |
 | `server.address` | `127.0.0.1` | Bind address — change to `0.0.0.0` for LAN access |
 | `spring.datasource.url` | `jdbc:sqlite:./gateway.db` | SQLite database path |
-| `aws.iot.endpoint` | *(set in file)* | AWS IoT endpoint URL |
+| `aws.iot.endpoint` | *(blank)* | AWS IoT endpoint URL — fallback used only if `provisioned.creds` has no `iotEndpoint`. Set via env var or a local `application.properties`; never commit a real value. |
 | `homeassistant.enabled` | `true` | Set to `false` to disable the Home Assistant subsystem |
 | `homeassistant.url` | `http://localhost:8123` | Home Assistant base URL — standalone/dev mode only |
 | `homeassistant.token` | *(blank)* | Home Assistant long-lived access token — standalone/dev mode only |
@@ -155,11 +155,17 @@ Written by the provisioning flow. Can be JSON (new format) or EDN (legacy format
   "certPem": "-----BEGIN CERTIFICATE-----\n...",
   "privateKey": "-----BEGIN RSA PRIVATE KEY-----\n...",
   "certId": "abc123",
-  "serialNumber": "10000000abcdef01"
+  "serialNumber": "10000000abcdef01",
+  "iotEndpoint": "xxxxxxxxxxxxxx-ats.iot.us-east-1.amazonaws.com"
 }
 ```
 
-If the file is absent, the gateway starts without MQTT connectivity and logs a warning.
+`iotEndpoint` is optional — omit it when the external fleet-provisioning flow already sets
+`aws.iot.endpoint` via the environment. See [Provisioning](#provisioning) below for loading these
+fields by hand instead of via fleet provisioning.
+
+If the file is absent, or no AWS IoT endpoint can be resolved, the gateway starts without MQTT
+connectivity and logs a warning.
 
 ---
 

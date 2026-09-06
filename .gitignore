@@ -6,6 +6,7 @@ ui-spec.md
 .claude/
 .gradle/
 build/
+bin/
 .vscode/
 gradle/
 provisioned.creds
@@ -13,8 +14,12 @@ gateway.db
 gateway.db-shm
 gateway.db-wal
 *.pem
+*.key
+*.p12
+*.pfx
+*.jks
+.env
+application-local.properties
 .idea/
 /org/
-
-
 

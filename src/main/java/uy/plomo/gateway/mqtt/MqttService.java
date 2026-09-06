@@ -44,7 +44,9 @@ public class MqttService {
     private static final long RECONNECT_MIN_MS =   1_000;
     private static final long RECONNECT_MAX_MS = 300_000; // 5 min — limits hammering during mass outages
 
-    @Value("${aws.iot.endpoint}")
+    @Value("${aws.iot.endpoint:}")
+    private String endpointProperty;
+
     private String endpoint;
 
     private final AppConfig              appConfig;
@@ -72,17 +74,33 @@ public class MqttService {
 
     @PostConstruct
     public void init() {
+        endpoint = resolveEndpoint();
         if ("disabled".equalsIgnoreCase(endpoint)) {
             log.info("MQTT disabled (test profile)");
             return;
         }
         if (!appConfig.getCreds().isComplete()) {
             log.warn("Gateway is not provisioned — MQTT client will not start. " +
-                     "Run the provisioning flow to generate credentials.");
+                     "Run the provisioning flow (or POST /api/v1/provisioning) to generate credentials.");
+            return;
+        }
+        if (endpoint == null || endpoint.isBlank()) {
+            log.warn("No AWS IoT endpoint configured (neither provisioned.creds nor aws.iot.endpoint) " +
+                     "— MQTT client will not start.");
             return;
         }
         gatewayName = appConfig.getCreds().getName();
         startClient();
+    }
+
+    /**
+     * provisioned.creds' own iotEndpoint (set via the manual provisioning UI) takes precedence
+     * over the static property, which remains the fallback for the external fleet-provisioning
+     * flow that doesn't set it.
+     */
+    private String resolveEndpoint() {
+        String fromCreds = appConfig.getCreds().getIotEndpoint();
+        return (fromCreds != null && !fromCreds.isBlank()) ? fromCreds : endpointProperty;
     }
 
     // ── Client lifecycle ──────────────────────────────────────────────────────
