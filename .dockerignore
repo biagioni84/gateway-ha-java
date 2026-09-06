@@ -1,0 +1,12 @@
+.git
+build
+.gradle
+bin
+*.db
+*.db-shm
+*.db-wal
+provisioned.creds
+*.pem
+*.key
+.idea
+.vscode

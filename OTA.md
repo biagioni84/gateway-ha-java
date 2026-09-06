@@ -83,6 +83,19 @@ gateway ALL=(ALL) NOPASSWD: /bin/systemctl restart gateway
 { "error": "update failed: <detail>" }
 ```
 
+### Container mode (add-on / Docker)
+
+`systemctl restart` has no systemd to talk to inside a container, so OTA is disabled outright when
+`gateway.deployment.mode=container` (set automatically by the Dockerfile). `POST /ota` short-circuits
+to:
+
+```json
+{ "status": "not_supported", "message": "OTA via MQTT isn't supported in container mode — update via the HA add-on store or `docker pull` + recreate instead" }
+```
+
+This is a deliberate gap, not a bug — see TODO.md. Bare-metal (`java -jar` + systemd) remains the
+only deployment with working MQTT-triggered OTA.
+
 ---
 
 ## Pending work (gateway-side)

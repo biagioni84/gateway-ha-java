@@ -1,0 +1,37 @@
+# Example for running the gateway as a plain Docker container alongside a Home Assistant that is
+# ALSO just a Docker container (no Supervisor/HAOS involved) — copy to docker-compose.yml and
+# adjust. Not used by the HA add-on path (see config.yaml/repository.yaml for that).
+#
+# Reaching Home Assistant from this container — pick one:
+#   - Same docker-compose stack as HA: set HOMEASSISTANT_URL to HA's service name, e.g.
+#     http://homeassistant:8123 (both services need to share a network — see below).
+#   - HA runs elsewhere on the LAN: use its IP/hostname, e.g. http://homeassistant.local:8123
+#     (works from a bridge network as long as the host can resolve/route it).
+#
+# AWS IoT credentials are NOT set here — start the container, then open
+# http://<host>:9098/setup.html to load the endpoint + certificate (see README > Provisioning).
+services:
+  gateway:
+    build: .
+    # or, once published: image: ghcr.io/biagioni84/gateway-ha-java:latest
+    restart: unless-stopped
+    environment:
+      HOMEASSISTANT_URL: "http://homeassistant.local:8123"
+      HOMEASSISTANT_TOKEN: "changeme-long-lived-access-token"
+      GATEWAY_AUTH_USERNAME: "admin"
+      GATEWAY_AUTH_PASSWORD: "changeme"
+      # server.address defaults to 127.0.0.1, which would make the published port below
+      # unreachable (a socket bound to loopback doesn't accept traffic arriving from outside
+      # the container's network namespace, no matter what Docker forwards to it). The
+      # container's own network isolation is already the boundary that 127.0.0.1 provides on
+      # bare-metal, so 0.0.0.0 here is the container-mode equivalent, not a security downgrade.
+      SERVER_ADDRESS: "0.0.0.0"
+    volumes:
+      - gateway-data:/data
+    ports:
+      # Needed to reach /setup.html or the REST API from the host. Remove if you'll only ever
+      # exec into the container, or don't expose it on a network you don't trust.
+      - "9098:9098"
+
+volumes:
+  gateway-data:

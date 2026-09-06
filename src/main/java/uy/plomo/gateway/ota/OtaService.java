@@ -38,6 +38,12 @@ import java.util.concurrent.TimeUnit;
  * TODO (S-OTA-2): Implement rollback — copy current JAR to gateway.jar.bak
  *   before replacing it. A wrapper start script should detect repeated
  *   crash-loop failures and restore the backup automatically.
+ *
+ * Disabled entirely in container mode (gateway.deployment.mode=container, set by the Dockerfile):
+ * `sudo systemctl restart` has no systemd to talk to in a container, and rewriting the JAR inside
+ * an image doesn't survive a restart anyway. Updates there come from the HA add-on store or
+ * `docker pull` + recreate instead — this is a deliberate gap (see known-gaps memory / TODO.md),
+ * not a bug to silently work around.
  */
 @Service
 @Slf4j
@@ -49,7 +55,15 @@ public class OtaService {
     @Value("${gateway.ota.service-name:gateway}")
     private String serviceName;
 
+    @Value("${gateway.deployment.mode:bare-metal}")
+    private String deploymentMode;
+
     public Map<String, Object> update(String url, String checksum) {
+        if ("container".equalsIgnoreCase(deploymentMode)) {
+            return Map.of("status", "not_supported",
+                    "message", "OTA via MQTT isn't supported in container mode — update via the " +
+                            "HA add-on store or `docker pull` + recreate instead");
+        }
         if (url == null || !url.startsWith("https://"))
             return Map.of("error", "url must use https://");
         if (checksum == null || checksum.isBlank())
