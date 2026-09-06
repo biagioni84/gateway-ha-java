@@ -1,5 +1,5 @@
 name: "Plomo Gateway"
-version: "0.1.0"
+version: "0.1.1"
 slug: "plomo_gateway"
 description: "AWS IoT <-> Home Assistant bridge gateway (mTLS MQTT + local REST API)"
 url: "https://github.com/biagioni84/gateway-ha-java"
