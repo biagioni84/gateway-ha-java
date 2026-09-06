@@ -62,6 +62,17 @@ public class AppConfig {
         }
     }
 
+    /**
+     * Replaces the current credentials (used by the manual provisioning UI —
+     * POST /api/v1/provisioning) and persists them the same way loadCreds() would have
+     * on next boot, including refreshing /tmp/priv.pem for PlatformService's SSH tunnel.
+     */
+    public void updateCreds(ProvisionedCreds newCreds) {
+        this.creds = newCreds;
+        saveCreds();
+        writePrivKey();
+    }
+
     public void saveCreds() {
         try {
             Path path = Path.of(credsPath);

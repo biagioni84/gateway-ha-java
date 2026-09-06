@@ -52,6 +52,7 @@ Cloud (AWS IoT) ──MQTT5/mTLS──► MqttService
 | `api` | `CameraRestController` | REST: `/cameras`, `/:dev/snapshot` |
 | `api` | `SequenceController` | REST: `/sequences`, `/sequences/:id`, `/sequences/:id/run` |
 | `api` | `ScheduleController` | REST: `/schedule`, `/schedule/:id` (stub) |
+| `api` | `ProvisioningController` | REST: `GET`/`POST /api/v1/provisioning` — manual credential loading, backs `/setup.html`. |
 | `homeassistant` | `HomeAssistantConnectionConfig` | Resolves HA URL/token — Supervisor addon mode vs. standalone dev mode. |
 | `homeassistant` | `HomeAssistantInterface` | Persistent WebSocket client to Home Assistant's Core API (auth handshake, `subscribe_events`, `call_service`, `get_states`). |
 | `homeassistant` | `HomeAssistantReportHandler` | Processes `state_changed` events, updates the device cache, forwards MQTT telemetry. |
@@ -166,6 +167,25 @@ fields by hand instead of via fleet provisioning.
 
 If the file is absent, or no AWS IoT endpoint can be resolved, the gateway starts without MQTT
 connectivity and logs a warning.
+
+---
+
+## Provisioning
+
+For installs that don't go through the external fleet-provisioning flow, open
+`http://<gateway-host>:9098/setup.html` in a browser to load the AWS IoT endpoint and device
+certificate by hand:
+
+1. Log in with the REST API credentials (`gateway.auth.username`/`password`).
+2. Paste the gateway name, AWS IoT endpoint, cert ID, serial number, certificate PEM, and private
+   key PEM, then save.
+3. Restart the gateway process — credentials are only read at startup (`MqttService` doesn't
+   reconnect live), so nothing takes effect until then.
+
+Under the hood this is just `GET`/`POST /api/v1/provisioning`, which reads/writes the same
+`provisioned.creds` file described above (`GET` never returns `certPem`/`privateKey`). The page
+itself is reachable without a token (it has its own login form), but the API it calls requires the
+same JWT Bearer auth as every other endpoint.
 
 ---
 

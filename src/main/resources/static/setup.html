@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gateway provisioning</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.3rem; }
+  fieldset { margin-bottom: 1.5rem; border: 1px solid #ccc; border-radius: 6px; }
+  label { display: block; margin-top: 0.75rem; font-weight: 600; font-size: 0.9rem; }
+  input, textarea { width: 100%; box-sizing: border-box; padding: 0.4rem; margin-top: 0.25rem; font-family: inherit; }
+  textarea { font-family: monospace; font-size: 0.8rem; height: 6rem; }
+  button { margin-top: 1rem; padding: 0.5rem 1rem; cursor: pointer; }
+  #status, #message { margin-top: 1rem; padding: 0.6rem; border-radius: 4px; font-size: 0.9rem; white-space: pre-wrap; }
+  .ok { background: #e6f4ea; color: #1e4620; }
+  .err { background: #fdecea; color: #611a15; }
+  #provisionForm { display: none; }
+</style>
+</head>
+<body>
+<h1>Gateway — manual provisioning</h1>
+<p>Load the AWS IoT endpoint and device certificate by hand. Requires a gateway restart after saving.</p>
+
+<fieldset>
+  <legend>Login</legend>
+  <label>Username <input id="username" value="admin"></label>
+  <label>Password <input id="password" type="password"></label>
+  <button id="loginBtn">Log in</button>
+  <div id="loginMessage"></div>
+</fieldset>
+
+<fieldset id="provisionForm">
+  <legend>Credentials</legend>
+  <div id="status"></div>
+  <label>Gateway name <input id="name"></label>
+  <label>AWS IoT endpoint <input id="iotEndpoint" placeholder="xxxxxxxxxxxxxx-ats.iot.us-east-1.amazonaws.com"></label>
+  <label>Cert ID <input id="certId"></label>
+  <label>Serial number <input id="serialNumber"></label>
+  <label>Certificate PEM <textarea id="certPem" placeholder="-----BEGIN CERTIFICATE-----"></textarea></label>
+  <label>Private key PEM <textarea id="privateKey" placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea></label>
+  <button id="saveBtn">Save credentials</button>
+  <div id="message"></div>
+</fieldset>
+
+<script>
+let token = null;
+
+function el(id) { return document.getElementById(id); }
+
+function setBox(box, text, ok) {
+  box.textContent = text;
+  box.className = ok ? 'ok' : 'err';
+}
+
+el('loginBtn').addEventListener('click', async () => {
+  el('loginMessage').textContent = '';
+  try {
+    const res = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: el('username').value, password: el('password').value })
+    });
+    const data = await res.json();
+    if (!res.ok) { setBox(el('loginMessage'), data.error || 'login failed', false); return; }
+    token = data.token;
+    el('provisionForm').style.display = 'block';
+    el('loginMessage').textContent = '';
+    await loadStatus();
+  } catch (e) {
+    setBox(el('loginMessage'), 'login failed: ' + e, false);
+  }
+});
+
+async function loadStatus() {
+  const res = await fetch('/api/v1/provisioning', { headers: { Authorization: 'Bearer ' + token } });
+  const data = await res.json();
+  el('status').textContent = data.provisioned
+    ? `Currently provisioned as "${data.name}" -> ${data.iotEndpoint}`
+    : 'Not provisioned yet.';
+  el('name').value = data.name || '';
+  el('iotEndpoint').value = data.iotEndpoint || '';
+  el('certId').value = data.certId || '';
+  el('serialNumber').value = data.serialNumber || '';
+}
+
+el('saveBtn').addEventListener('click', async () => {
+  const body = {
+    name: el('name').value,
+    iotEndpoint: el('iotEndpoint').value,
+    certId: el('certId').value,
+    serialNumber: el('serialNumber').value,
+    certPem: el('certPem').value,
+    privateKey: el('privateKey').value
+  };
+  try {
+    const res = await fetch('/api/v1/provisioning', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    setBox(el('message'), data.message || data.error, res.ok);
+    if (res.ok) await loadStatus();
+  } catch (e) {
+    setBox(el('message'), 'save failed: ' + e, false);
+  }
+});
+</script>
+</body>
+</html>
