@@ -9,6 +9,9 @@ arch:
 startup: services
 boot: auto
 init: false
+# Without this, the Supervisor rejects the SUPERVISOR_TOKEN on http://supervisor/core and
+# ws://supervisor/core/websocket with "Invalid access" — it's off by default for every add-on.
+homeassistant_api: true
 map:
   - data:rw
 # Exposed so /setup.html (AWS IoT provisioning, see README) is reachable — everything else the
