@@ -65,7 +65,7 @@ Cloud (AWS IoT) ──MQTT5/mTLS──► MqttService
 | `device` | `DeviceService` | CRUD for devices, attributes, pincodes. Fully protocol-agnostic. |
 | `sequence` | `SequenceService` | CRUD for named device command sequences. |
 | `platform` | `PlatformService` | Serial number, timezone, SSH public key. |
-| `config` | `AppConfig` | Loads `provisioned.creds` (EDN or JSON). |
+| `config` | `AppConfig` | Loads `provisioned.creds` (JSON). |
 
 ---
 
@@ -73,7 +73,7 @@ Cloud (AWS IoT) ──MQTT5/mTLS──► MqttService
 
 - Java 17
 - Gradle 9+
-- A provisioned `provisioned.creds` file (JSON or legacy EDN)
+- A provisioned `provisioned.creds` file (JSON)
 - A reachable Home Assistant instance — either:
   - Supervisor-managed: this project running as an HA add-on (auto-detected via the
     `SUPERVISOR_TOKEN` environment variable), or
@@ -184,7 +184,7 @@ homeassistant.enabled=false
 
 ## Credentials file (`provisioned.creds`)
 
-Written by the provisioning flow. Can be JSON (new format) or EDN (legacy format).
+Written by the provisioning flow (JSON).
 
 **JSON format:**
 ```json

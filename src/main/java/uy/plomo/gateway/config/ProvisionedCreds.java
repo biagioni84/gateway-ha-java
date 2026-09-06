@@ -1,19 +1,14 @@
 package uy.plomo.gateway.config;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 /**
- * Credentials provisioned by AWS IoT Fleet Provisioning.
- * Loaded from provisioned.creds at startup.
- *
- * The file can be in EDN format (Clojure legacy):
- *   {:name "gw-xxx" :cert-pem "-----BEGIN..." :private-key "-----BEGIN..." :cert-id "abc"}
- * or in JSON format (new Java version):
+ * Credentials provisioned by AWS IoT Fleet Provisioning, or loaded by hand via the manual
+ * provisioning UI (POST /api/v1/provisioning). Loaded from provisioned.creds (JSON) at startup:
  *   {"name":"gw-xxx","certPem":"-----BEGIN...","privateKey":"-----BEGIN...","certId":"abc"}
  *
- * iotEndpoint is optional: set when credentials are loaded via the manual provisioning UI
- * (POST /api/v1/provisioning). When absent, MqttService falls back to the aws.iot.endpoint
- * property, which is how the external fleet-provisioning flow (EDN format) still works.
+ * iotEndpoint is optional — when absent, MqttService falls back to the aws.iot.endpoint property.
  */
 @Data
 public class ProvisionedCreds {
@@ -24,6 +19,7 @@ public class ProvisionedCreds {
     private String serialNumber;
     private String iotEndpoint;
 
+    @JsonIgnore
     public boolean isComplete() {
         return name != null && !name.isBlank()
                 && certPem != null && !certPem.isBlank()
