@@ -28,6 +28,10 @@ public class SecurityConfig {
                 .requestMatchers("/auth/login").permitAll()
                 // Swagger UI — restrict in production if needed
                 .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                // Manual provisioning page itself is public (it has its own login form that
+                // calls /auth/login); the /api/v1/provisioning endpoints it talks to stay
+                // behind JWT auth like everything else.
+                .requestMatchers("/setup.html").permitAll()
                 .anyRequest().authenticated()
             )
             // Return 401 JSON-friendly instead of redirecting to a login page
