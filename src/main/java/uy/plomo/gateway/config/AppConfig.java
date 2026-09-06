@@ -14,14 +14,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Loads gateway.conf and provisioned.creds at startup.
  *
  * gateway.conf: ignored for now — all config lives in application.properties.
- * provisioned.creds: parsed from EDN (legacy Clojure) or JSON (new Java format).
+ * provisioned.creds: JSON only.
  */
 @Component
 @Slf4j
@@ -50,13 +48,8 @@ public class AppConfig {
         }
         try {
             String content = Files.readString(Path.of(credsPath));
-            if (content.trim().startsWith("{\"")) {
-                creds = objectMapper.readValue(content, ProvisionedCreds.class);
-                log.info("Loaded provisioned.creds (JSON) — name={}", creds.getName());
-            } else {
-                creds = parseEdn(content);
-                log.info("Loaded provisioned.creds (EDN) — name={}", creds.getName());
-            }
+            creds = objectMapper.readValue(content, ProvisionedCreds.class);
+            log.info("Loaded provisioned.creds — name={}", creds.getName());
         } catch (IOException e) {
             log.error("Failed to load provisioned.creds", e);
         }
@@ -122,28 +115,5 @@ public class AppConfig {
         } catch (IOException e) {
             log.error("Failed to write /tmp/priv.pem", e);
         }
-    }
-
-    /**
-     * Minimal EDN parser for the provisioned.creds format written by the Clojure gateway.
-     * Handles: {:name "..." :cert-pem "..." :private-key "..." :cert-id "..." :serial-number "..."}
-     * Does NOT handle nested maps or complex EDN.
-     */
-    private ProvisionedCreds parseEdn(String edn) {
-        ProvisionedCreds c = new ProvisionedCreds();
-        c.setName(ednString(edn, "name"));
-        c.setCertPem(ednString(edn, "cert-pem"));
-        c.setPrivateKey(ednString(edn, "private-key"));
-        c.setCertId(ednString(edn, "cert-id"));
-        c.setSerialNumber(ednString(edn, "serial-number"));
-        return c;
-    }
-
-    private String ednString(String edn, String key) {
-        Matcher m = Pattern.compile(":" + Pattern.quote(key) + "\\s+\"((?:[^\"\\\\]|\\\\.)*)\"").matcher(edn);
-        if (m.find()) {
-            return m.group(1).replace("\\n", "\n").replace("\\\"", "\"");
-        }
-        return null;
     }
 }
