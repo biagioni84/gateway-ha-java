@@ -51,14 +51,27 @@ public class GatewayApiService {
 
     // ── Summary ───────────────────────────────────────────────────────────────
 
+    /**
+     * HAv1: one entry per physical HA device (all its entities grouped together — see
+     * HomeAssistantController.buildGroupSummary()), not one entry per HA entity as before.
+     * Entities with no HA device_id (helpers, some templates) form a group-of-one keyed by their
+     * own row id. Non-"ha" rows (pre-migration leftovers, if any) pass through unchanged.
+     */
     public Map<String, Object> getSummary() {
+        Map<String, List<Device>> groups = new LinkedHashMap<>();
+        deviceService.listAll().values().forEach(dev -> {
+            String groupId = "ha".equals(dev.getProtocol())
+                    ? groupIdOf(dev)
+                    : dev.getId();
+            groups.computeIfAbsent(groupId, k -> new ArrayList<>()).add(dev);
+        });
+
         Map<String, Object> devices = new LinkedHashMap<>();
-        deviceService.listAll().forEach((id, dev) -> {
-            Map<String, Object> parsed = switch (dev.getProtocol() != null ? dev.getProtocol() : "") {
-                case "ha" -> haController.parseDevice(id, dev);
-                default   -> Map.of("id", id);
-            };
-            devices.put(id, parsed);
+        groups.forEach((groupId, members) -> {
+            Map<String, Object> parsed = "ha".equals(members.get(0).getProtocol())
+                    ? haController.buildGroupSummary(groupId, members)
+                    : Map.of("id", groupId);
+            devices.put(groupId, parsed);
         });
 
         String tz  = platformService.getTimezone();
@@ -73,12 +86,19 @@ public class GatewayApiService {
         Map<String, Object> r = new LinkedHashMap<>();
         r.put("gw_id",      platformService.getSerialNumber());
         r.put("fw_version", FW_VERSION);
+        r.put("version",    "HAv1");
         r.put("time",       now);
         r.put("timezone",   tz);
         r.put("devices",    devices);
         String pubkey = platformService.getPublicKey();
         if (pubkey != null) r.put("pubkey", pubkey);
         return r;
+    }
+
+    /** HA device_id if the entity belongs to one, else its own row id (group-of-one). */
+    private static String groupIdOf(Device dev) {
+        Object haDeviceId = dev.getAttribute("_meta", "ha_device_id");
+        return haDeviceId != null ? haDeviceId.toString() : dev.getId();
     }
 
     // ── Inclusion / Exclusion ─────────────────────────────────────────────────
@@ -124,32 +144,32 @@ public class GatewayApiService {
     // ── Device CRUD ───────────────────────────────────────────────────────────
 
     public Map<String, Object> getDevice(String devId) {
-        Optional<Device> opt = deviceService.findById(devId);
-        if (opt.isEmpty()) return Map.of("error", "device not found: " + devId);
-        Device dev = opt.get();
-        return switch (dev.getProtocol() != null ? dev.getProtocol() : "") {
-            case "ha" -> haController.parseDevice(devId, dev);
-            default   -> Map.of("id", devId);
-        };
+        List<Device> members = deviceService.findGroupMembers(devId);
+        if (members.isEmpty()) return Map.of("error", "device not found: " + devId);
+        return "ha".equals(members.get(0).getProtocol())
+                ? haController.buildGroupSummary(devId, members)
+                : Map.of("id", devId);
     }
 
     /**
-     * Deletes the local device row only — Home Assistant owns entity lifecycle, so this does
-     * not reach into HA/the underlying integration to un-pair the device. Use the Home
+     * Deletes every local row in the device group — Home Assistant owns entity lifecycle, so
+     * this does not reach into HA/the underlying integration to un-pair the device. Use the Home
      * Assistant UI (or the device's own reset procedure) to actually remove it from the mesh.
      */
     public Map<String, Object> deleteDevice(String devId) {
-        deviceService.deleteById(devId);
+        List<Device> members = deviceService.findGroupMembers(devId);
+        deviceService.deleteByIds(members.stream().map(Device::getId).toList());
         return Map.of("status", "deleted");
     }
 
     // ── Device commands ───────────────────────────────────────────────────────
 
     /**
-     * Route a device command after resolving the device from DB.
+     * Route a device command after resolving the device group from DB.
      *
-     * @param devId   UUID of the device
-     * @param cmd     command name, e.g. "lock", "pincode", "switch", "thermostat"
+     * @param devId   group id (HA device_id, or a group-of-one's own row id) from GET /summary
+     * @param cmd     action name from that group's "actions" list, e.g. "lock", "turn_on" — plus
+     *                the cross-protocol "fwd_event"/"name" below, which apply to the whole group
      * @param subId   optional sub-ID (e.g. pincode slot from path)
      * @param method  HTTP method string: GET | POST | DELETE
      * @param body    parsed request body
@@ -157,14 +177,18 @@ public class GatewayApiService {
     public Map<String, Object> handleDeviceCommand(
             String devId, String cmd, String subId, String method, Map<String, Object> body) {
 
-        Optional<Device> opt = deviceService.findById(devId);
-        if (opt.isEmpty()) return Map.of("error", "device not found: " + devId);
-        Device dev = opt.get();
+        List<Device> members = deviceService.findGroupMembers(devId);
+        if (members.isEmpty()) return Map.of("error", "device not found: " + devId);
+        // fwd_event/name apply to the group as a whole — stored against whichever entity
+        // buildGroupSummary() would also pick to represent it (haController.resolvePrimary uses
+        // the same rule), so the two stay consistent.
+        Device primary = "ha".equals(members.get(0).getProtocol())
+                ? haController.resolvePrimary(members) : members.get(0);
 
         // Cross-protocol commands
         if ("fwd_event".equals(cmd)) {
-            List<String> events = dev.getFwdEvents() == null
-                    ? new ArrayList<>() : new ArrayList<>(dev.getFwdEvents());
+            List<String> events = primary.getFwdEvents() == null
+                    ? new ArrayList<>() : new ArrayList<>(primary.getFwdEvents());
             switch (method) {
                 case "GET" -> { return Map.of("fwdEvents", events); }
                 case "POST" -> {
@@ -186,25 +210,25 @@ public class GatewayApiService {
                     events.remove(ev);
                 }
             }
-            dev.setFwdEvents(events);
-            deviceService.save(dev);
+            primary.setFwdEvents(events);
+            deviceService.save(primary);
             return Map.of("status", "ok", "fwdEvents", events);
         }
 
         if ("name".equals(cmd) && "POST".equals(method)) {
             String name = str(body, "value");
             if (name != null) {
-                dev.setName(name);
-                deviceService.save(dev);
+                primary.setName(name);
+                deviceService.save(primary);
             }
             return Map.of("status", "ok");
         }
 
         // Protocol-specific dispatch
-        String proto = dev.getProtocol();
+        String proto = primary.getProtocol();
         if (proto == null) return Map.of("error", "device has no protocol");
         return switch (proto) {
-            case "ha" -> haController.handleDeviceCommand(dev, cmd, subId, method, body);
+            case "ha" -> haController.handleDeviceCommand(devId, members, cmd, subId, method, body);
             default   -> Map.of("error", "unknown protocol: " + proto);
         };
     }
@@ -512,7 +536,7 @@ public class GatewayApiService {
                         .filter(d -> d.getNode() != null && d.getNode().startsWith("camera."))
                         .toList();
                 yield Map.of("cameras", cameras.stream()
-                        .map(d -> haController.parseDevice(d.getId(), d))
+                        .map(d -> haController.parseCameraDevice(d.getId(), d))
                         .toList());
             }
             default -> {

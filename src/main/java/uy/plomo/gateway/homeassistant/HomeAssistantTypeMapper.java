@@ -33,7 +33,8 @@ public final class HomeAssistantTypeMapper {
         };
     }
 
-    private static boolean isDimmableLight(JsonNode attributes) {
+    /** Public so HomeAssistantController's action-generation can reuse the same rule. */
+    public static boolean isDimmableLight(JsonNode attributes) {
         if (attributes == null) return true; // unknown capability — default to the richer control surface
         JsonNode modes = attributes.path("supported_color_modes");
         if (!modes.isArray() || modes.isEmpty()) return true;

@@ -12,6 +12,10 @@ import java.util.Map;
 /**
  * REST controller for per-device operations.
  *
+ * {dev} is a HAv1 device group id (see GET /summary) — {cmd} is one of that group's advertised
+ * "actions", resolved against whichever entity in the group actually provides it (see
+ * HomeAssistantController.handleDeviceCommand()), not a fixed verb assumed to match one domain.
+ *
  * Routes (more-specific Spring routes in other controllers take priority):
  *   GET    /{dev}
  *   DELETE /{dev}
@@ -37,13 +41,20 @@ public class DeviceController {
     }
 
     @Operation(summary = "Device command", description =
-            "Dispatches a command to the device. Accepted cmd values:\n" +
-            "- lock: GET → current state; POST { value: lock|unlock }\n" +
-            "- switch: GET → current state; POST { value: on|off }\n" +
-            "- level (Z-Wave): GET → current level; POST { value: 0-99 }\n" +
-            "- thermostat (Z-Wave): GET → heat/cool/mode; POST { heat, cool, mode: off|heat|cool|auto }\n" +
+            "Dispatches an action to the device group — see that device's \"actions\" list in " +
+            "GET /summary for what's actually available on it (varies per device: a lock offers " +
+            "lock/unlock/pincode, a dimmable light offers turn_on/turn_off/toggle/set_level, a " +
+            "thermostat offers set_temperature/set_hvac_mode, etc. — collisions within a group " +
+            "are suffixed _1/_2/...). Common ones:\n" +
+            "- turn_on / turn_off / toggle: switch, light, fan\n" +
+            "- set_level: POST { value: 0-99 } — dimmable lights only\n" +
+            "- lock / unlock: locks\n" +
             "- pincode: POST { slot, code } to set; DELETE { slot } to remove; GET { slot } to read\n" +
-            "- poll_pincodes: GET → cached pincode map\n" +
+            "- set_temperature: POST { heat, cool } or { temperature }\n" +
+            "- set_hvac_mode: POST { mode }\n" +
+            "- open / close / stop / set_position: covers\n" +
+            "- set_speed / oscillate / set_direction: fans\n" +
+            "- service: escape hatch, POST { domain, service, data?, entity_id? }\n" +
             "- name: POST { value: string } to rename\n" +
             "- fwd_event: POST { ev: cmdName } to subscribe; DELETE { ev } to unsubscribe")
     @RequestMapping(value = "/{dev}/{cmd}", method = {

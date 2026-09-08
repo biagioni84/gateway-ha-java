@@ -8,20 +8,21 @@ import uy.plomo.gateway.device.Device;
 import uy.plomo.gateway.homeassistant.camera.HomeAssistantCameraController;
 import uy.plomo.gateway.homeassistant.lock.LockCodeProvider;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
- * High-level Home Assistant device operations.
+ * High-level Home Assistant device operations — HAv1 grouped summary + action dispatch.
  *
- * Mirrors ZWaveController/ZigbeeController/MatterController for GatewayApiService integration:
- * parseDevice() builds the flat device-summary map, handleDeviceCommand() routes the friendly
- * command verbs used by the existing REST/MQTT API to Home Assistant service calls.
+ * A gateway "device" is now a group of HA entities sharing the same HA device_id (or a
+ * group-of-one, for entities with no HA device — helpers, some templates). buildGroupSummary()
+ * builds the {status, actions} shape for a group; handleDeviceCommand() resolves an action name
+ * against whichever entity in the group actually provides it.
  *
- * Device.node stores the HA entity_id (e.g. "lock.front_door").
- *
- * Pincode management is not yet implemented here — see the LockCodeProvider seam (M4.5).
+ * Device.node stores the HA entity_id (e.g. "lock.front_door") on each *member* row — the group
+ * itself has no row of its own, see GatewayApiService.getSummary()/handleDeviceCommand().
  */
 @Component
 @Slf4j
@@ -32,109 +33,274 @@ public class HomeAssistantController {
     private final LockCodeProvider              lockCodeProvider;
     private final HomeAssistantCameraController cameraController;
 
-    // ── Summary view ──────────────────────────────────────────────────────────
+    // Entities with no controllable domain contribute this priority tier (== not present in the
+    // list). HA itself has no "primary entity" concept for a multi-entity device — this ordering
+    // is ours: prefer whatever's actionable, then sensors, most descriptive first.
+    private static final List<String> DOMAIN_PRIORITY = List.of(
+            "lock", "climate", "switch", "light", "cover", "fan", "camera", "binary_sensor", "sensor");
 
-    public Map<String, Object> parseDevice(String id, Device dev) {
-        String entityId = dev.getNode();
-        if (entityId != null && "camera".equals(domainOf(entityId))) {
-            return cameraController.parseDevice(id, dev);
+    // ── Group summary ─────────────────────────────────────────────────────────
+
+    /** Picks the entity that represents the group for id/type/name/available purposes. */
+    public Device resolvePrimary(List<Device> members) {
+        return members.stream()
+                .min(Comparator
+                        .comparingInt((Device d) -> domainPriorityIndex(domainOf(d.getNode())))
+                        .thenComparingInt(d -> isDiagnosticOrConfig(d) ? 1 : 0)
+                        .thenComparing(Device::getNode))
+                .orElse(members.get(0));
+    }
+
+    public Map<String, Object> buildGroupSummary(String groupId, List<Device> members) {
+        Device primary = resolvePrimary(members);
+        String primaryEntityId = primary.getNode();
+        String primaryDomain = domainOf(primaryEntityId);
+
+        if ("camera".equals(primaryDomain)) {
+            // Cameras keep their own existing summary/command handling untouched.
+            return parseCameraDevice(groupId, primary);
         }
 
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("id",       id);
+        out.put("id",       groupId);
         out.put("protocol", "ha");
-        out.put("name",     dev.getName());
-        out.put("node",     dev.getNode());
+        out.put("name",     primary.getName());
 
-        if (entityId == null) {
-            putOffline(out, dev);
-            return out;
-        }
+        HAState primaryState = haInterface.getState(primaryEntityId);
+        String type = primaryState != null
+                ? HomeAssistantTypeMapper.inferType(primaryDomain, primaryState.attributes())
+                : primary.getType();
+        out.put("type",         type != null ? type : primary.getType());
+        out.put("manufacturer", primary.getManufacturer());
+        out.put("modelId",      primary.getModelId());
+        out.put("areaId",       strAttr(primary, "area_id"));
+        out.put("areaName",     strAttr(primary, "area_name"));
 
-        String domain = domainOf(entityId);
-        HAState cached = haInterface.getState(entityId);
+        boolean available = primaryState != null
+                && !"unavailable".equals(primaryState.state()) && !"unknown".equals(primaryState.state());
+        out.put("available", available);
 
-        if (cached != null) {
-            String type = HomeAssistantTypeMapper.inferType(domain, cached.attributes());
-            out.put("type",           type != null ? type : dev.getType());
-            out.put("manufacturer",   dev.getManufacturer());
-            out.put("manufacturerId", dev.getManufacturerId());
-            out.put("modelId",        dev.getModelId());
-            boolean available = !"unavailable".equals(cached.state()) && !"unknown".equals(cached.state());
-            out.put("available", available);
-            out.put("status",    inferStatus(type, cached));
-            out.put("battery",   null); // battery lives on a separate HA entity — not resolved here yet
-        } else {
-            putOffline(out, dev);
-        }
+        out.put("status",  buildStatus(members));
+        out.put("actions", buildActions(members));
         return out;
     }
 
-    private static void putOffline(Map<String, Object> out, Device dev) {
-        out.put("type",           dev.getType());
-        out.put("manufacturer",   dev.getManufacturer());
-        out.put("manufacturerId", dev.getManufacturerId());
-        out.put("modelId",        dev.getModelId());
-        out.put("available",      false);
-        out.put("status",         null);
-        out.put("battery",        null);
+    /** Exposed for GatewayApiService.handleCameraNetwork()'s per-entity camera listing. */
+    public Map<String, Object> parseCameraDevice(String id, Device dev) {
+        return cameraController.parseDevice(id, dev);
     }
 
-    private static Object inferStatus(String type, HAState state) {
-        if (type == null) return null;
-        String raw = state.state();
-        if (raw == null) return null;
-        return switch (type) {
-            case "switch" -> raw; // HA already uses "on"/"off"
-            case "dimmer" -> {
-                if (!"on".equals(raw)) yield raw;
-                JsonNode brightness = state.attributes() != null ? state.attributes().path("brightness") : null;
-                if (brightness == null || brightness.isMissingNode() || brightness.isNull()) yield "on";
-                yield Math.round(brightness.asInt() / 255.0f * 99); // normalize HA's 0-255 to the existing 0-99 convention
+    private static int domainPriorityIndex(String domain) {
+        int idx = DOMAIN_PRIORITY.indexOf(domain);
+        return idx >= 0 ? idx : DOMAIN_PRIORITY.size();
+    }
+
+    private static boolean isDiagnosticOrConfig(Device d) {
+        Object cat = d.getAttribute("_meta", "entity_category");
+        return "diagnostic".equals(cat) || "config".equals(cat);
+    }
+
+    private static String strAttr(Device d, String key) {
+        Object v = d.getAttribute("_meta", key);
+        return v != null ? v.toString() : null;
+    }
+
+    // ── status: one value per entity in the group, keyed by a short label ──────
+
+    private Map<String, Object> buildStatus(List<Device> members) {
+        Map<String, Device> disambiguated = disambiguate(members, Device::getNode, this::statusLabel);
+        Map<String, Object> status = new LinkedHashMap<>();
+        disambiguated.forEach((label, dev) -> {
+            HAState state = haInterface.getState(dev.getNode());
+            status.put(label, state != null ? state.state() : null);
+        });
+        return status;
+    }
+
+    /** "sensor-battery" -> "battery"; non-sensor domains use the domain itself ("lock", "climate"). */
+    private String statusLabel(Device dev) {
+        String domain = domainOf(dev.getNode());
+        HAState state = haInterface.getState(dev.getNode());
+        String type = state != null ? HomeAssistantTypeMapper.inferType(domain, state.attributes()) : dev.getType();
+        if (type != null && type.startsWith("sensor-")) return type.substring("sensor-".length());
+        return domain;
+    }
+
+    // ── actions: what this group of entities can be told to do ─────────────────
+
+    private record ActionSource(String action, String entityId) {}
+
+    private List<String> buildActions(List<Device> members) {
+        List<ActionSource> sources = new ArrayList<>();
+        for (Device dev : members) {
+            String entityId = dev.getNode();
+            String domain = domainOf(entityId);
+            HAState state = haInterface.getState(entityId);
+            JsonNode attrs = state != null ? state.attributes() : null;
+            for (String action : actionsFor(domain, attrs)) {
+                sources.add(new ActionSource(action, entityId));
             }
-            case "lock"   -> raw; // HA already uses "locked"/"unlocked"/"jammed"/...
-            case "camera" -> "unavailable".equals(raw) ? "offline" : "streaming";
-            default -> raw;
+        }
+        Map<String, ActionSource> disambiguated =
+                disambiguate(sources, ActionSource::entityId, ActionSource::action);
+        return new ArrayList<>(disambiguated.keySet());
+    }
+
+    /**
+     * Candidate actions per domain, gated on real capability attributes where HA exposes one
+     * (supported_features bitmasks verified against home-assistant/core source — not guessed):
+     *   ClimateEntityFeature: TARGET_TEMPERATURE=1, TARGET_TEMPERATURE_RANGE=2
+     *   CoverEntityFeature:   OPEN=1, CLOSE=2, SET_POSITION=4, STOP=8
+     *   FanEntityFeature:     SET_SPEED=1, OSCILLATE=2, DIRECTION=4
+     * turn_on/turn_off/toggle for switch/light/fan are treated as unconditional (same level of
+     * assumption the old on/off/toggle cmds already made) rather than gated on fan's own
+     * TURN_ON/TURN_OFF bits — consistent, not a new assumption.
+     */
+    private static List<String> actionsFor(String domain, JsonNode attrs) {
+        return switch (domain) {
+            case "lock"   -> List.of("lock", "unlock", "pincode");
+            case "switch" -> List.of("turn_on", "turn_off", "toggle");
+            case "light"  -> HomeAssistantTypeMapper.isDimmableLight(attrs)
+                    ? List.of("turn_on", "turn_off", "toggle", "set_level")
+                    : List.of("turn_on", "turn_off", "toggle");
+            case "fan"    -> fanActions(attrs);
+            case "climate" -> climateActions(attrs);
+            case "cover"   -> coverActions(attrs);
+            default -> List.of(); // binary_sensor, sensor: read-only; camera handled separately
         };
     }
 
-    // ── Device commands ───────────────────────────────────────────────────────
+    private static List<String> fanActions(JsonNode attrs) {
+        List<String> actions = new ArrayList<>(List.of("turn_on", "turn_off"));
+        int features = supportedFeatures(attrs);
+        if ((features & 1) != 0) actions.add("set_speed");     // SET_SPEED
+        if ((features & 2) != 0) actions.add("oscillate");     // OSCILLATE
+        if ((features & 4) != 0) actions.add("set_direction"); // DIRECTION
+        return actions;
+    }
 
+    private static List<String> climateActions(JsonNode attrs) {
+        List<String> actions = new ArrayList<>();
+        int features = supportedFeatures(attrs);
+        if ((features & 1) != 0 || (features & 2) != 0) actions.add("set_temperature");
+        JsonNode hvacModes = attrs != null ? attrs.path("hvac_modes") : null;
+        if (hvacModes != null && hvacModes.isArray() && hvacModes.size() > 1) actions.add("set_hvac_mode");
+        return actions;
+    }
+
+    private static List<String> coverActions(JsonNode attrs) {
+        List<String> actions = new ArrayList<>();
+        int features = supportedFeatures(attrs);
+        if ((features & 1) != 0) actions.add("open");
+        if ((features & 2) != 0) actions.add("close");
+        if ((features & 4) != 0) actions.add("set_position");
+        if ((features & 8) != 0) actions.add("stop");
+        return actions;
+    }
+
+    private static int supportedFeatures(JsonNode attrs) {
+        return attrs != null ? attrs.path("supported_features").asInt(0) : 0;
+    }
+
+    /**
+     * Groups items by a base label, disambiguating collisions by sorting the colliding items'
+     * entity_id and suffixing _1, _2... in that order — used both for status map keys (two
+     * entities of the same kind, e.g. two "occupancy" binary_sensors on one device) and for
+     * action-name collisions (two entities in the same group offering the same action).
+     */
+    private static <T> Map<String, T> disambiguate(
+            List<T> items, Function<T, String> entityIdOf, Function<T, String> labelOf) {
+        Map<String, List<T>> byLabel = new LinkedHashMap<>();
+        for (T item : items) byLabel.computeIfAbsent(labelOf.apply(item), k -> new ArrayList<>()).add(item);
+
+        Map<String, T> result = new LinkedHashMap<>();
+        byLabel.forEach((label, group) -> {
+            if (group.size() == 1) {
+                result.put(label, group.get(0));
+                return;
+            }
+            List<T> sorted = new ArrayList<>(group);
+            sorted.sort(Comparator.comparing(entityIdOf));
+            for (int i = 0; i < sorted.size(); i++) {
+                result.put(label + "_" + (i + 1), sorted.get(i));
+            }
+        });
+        return result;
+    }
+
+    // ── Command dispatch: resolve an action against the group's members ─────────
+
+    /**
+     * @param groupId the group id from the summary (HA device_id, or a fallback for a
+     *                group-of-one) — kept only for error messages here, resolution is by
+     *                {@code members}
+     * @param members all Device rows in this group
+     * @param action  action name from GET /summary's "actions" list for this group
+     */
     public Map<String, Object> handleDeviceCommand(
-            Device dev, String cmd, String subId, String method, Map<String, Object> body) {
+            String groupId, List<Device> members, String action, String subId, String method, Map<String, Object> body) {
 
-        String entityId = dev.getNode();
-        if (entityId == null) return Map.of("error", "device has no Home Assistant entity id");
-        String domain = domainOf(entityId);
-        if ("camera".equals(domain)) {
-            return cameraController.handleDeviceCommand(dev, cmd, method, body);
+        // "service" is a universal escape-hatch, always available, targeting the primary entity
+        // unless the body names a different one — matches the old per-entity behavior.
+        if ("service".equals(action)) {
+            return handleServicePassthrough(resolvePrimary(members).getNode(), body);
         }
 
-        return switch (cmd) {
-            case "on"         -> callServiceSync(domain, "turn_on", entityId, null);
-            case "off"        -> callServiceSync(domain, "turn_off", entityId, null);
-            case "toggle"     -> callServiceSync(domain, "toggle", entityId, null);
-            case "switch"     -> handleSwitch(domain, entityId, method, body);
-            case "level"      -> handleLevel(entityId, body);
-            case "lock"       -> handleLock(entityId, method, body);
-            case "thermostat" -> handleThermostat(entityId, body);
-            case "pincode"    -> handlePincode(entityId, subId, method, body);
-            case "service"    -> handleServicePassthrough(entityId, body);
-            default -> Map.of("error", "unknown command: " + cmd);
+        Map<String, String> actionToEntity = resolveActionEntities(members);
+        String entityId = actionToEntity.get(action);
+        if (entityId == null) {
+            return Map.of("error", "unknown action '" + action + "' for device " + groupId);
+        }
+        String baseAction = stripCollisionSuffix(action);
+
+        return switch (baseAction) {
+            case "turn_on"  -> callServiceSync(domainOf(entityId), "turn_on", entityId, null);
+            case "turn_off" -> callServiceSync(domainOf(entityId), "turn_off", entityId, null);
+            case "toggle"   -> callServiceSync(domainOf(entityId), "toggle", entityId, null);
+            case "set_level" -> handleSetLevel(entityId, body);
+            case "lock"      -> callServiceSync("lock", "lock", entityId, null);
+            case "unlock"    -> callServiceSync("lock", "unlock", entityId, null);
+            case "pincode"   -> handlePincode(entityId, subId, method, body);
+            case "set_temperature" -> handleSetTemperature(entityId, body);
+            case "set_hvac_mode"   -> handleSetHvacMode(entityId, body);
+            case "open"          -> callServiceSync("cover", "open_cover", entityId, null);
+            case "close"         -> callServiceSync("cover", "close_cover", entityId, null);
+            case "stop"          -> callServiceSync("cover", "stop_cover", entityId, null);
+            case "set_position"  -> handleSetPosition(entityId, body);
+            case "set_speed"     -> handleSetFanSpeed(entityId, body);
+            case "oscillate"     -> handleOscillate(entityId, body);
+            case "set_direction" -> handleSetDirection(entityId, body);
+            default -> Map.of("error", "unknown action: " + action);
         };
     }
 
-    private Map<String, Object> handleSwitch(String domain, String entityId, String method, Map<String, Object> body) {
-        if ("GET".equals(method)) {
-            HAState s = haInterface.getState(entityId);
-            return Map.of("value", s != null && s.state() != null ? s.state() : "");
+    /** Same disambiguation buildActions() used, but action -> entityId instead of just names. */
+    private Map<String, String> resolveActionEntities(List<Device> members) {
+        List<ActionSource> sources = new ArrayList<>();
+        for (Device dev : members) {
+            String entityId = dev.getNode();
+            HAState state = haInterface.getState(entityId);
+            JsonNode attrs = state != null ? state.attributes() : null;
+            for (String action : actionsFor(domainOf(entityId), attrs)) {
+                sources.add(new ActionSource(action, entityId));
+            }
         }
-        Object value = body != null ? body.get("value") : null;
-        boolean on = "on".equals(value) || Boolean.TRUE.equals(value);
-        return callServiceSync(domain, on ? "turn_on" : "turn_off", entityId, null);
+        Map<String, ActionSource> disambiguated =
+                disambiguate(sources, ActionSource::entityId, ActionSource::action);
+        Map<String, String> result = new LinkedHashMap<>();
+        disambiguated.forEach((action, src) -> result.put(action, src.entityId()));
+        return result;
     }
 
-    private Map<String, Object> handleLevel(String entityId, Map<String, Object> body) {
+    /**
+     * "turn_on_2" -> "turn_on" so the switch below can dispatch on the underlying HA semantics —
+     * safe unconditionally because no action name in actionsFor() legitimately ends in "_<digits>".
+     */
+    private static String stripCollisionSuffix(String action) {
+        return action.replaceFirst("_\\d+$", "");
+    }
+
+    private Map<String, Object> handleSetLevel(String entityId, Map<String, Object> body) {
         Object valueObj = body != null ? body.get("value") : null;
         if (valueObj == null) return Map.of("error", "value is required");
         int pct;
@@ -148,30 +314,44 @@ public class HomeAssistantController {
         return callServiceSync("light", "turn_on", entityId, Map.of("brightness_pct", pct));
     }
 
-    private Map<String, Object> handleLock(String entityId, String method, Map<String, Object> body) {
-        if ("GET".equals(method)) {
-            HAState s = haInterface.getState(entityId);
-            return Map.of("value", s != null && s.state() != null ? s.state() : "");
-        }
-        Object value = body != null ? body.get("value") : null;
-        boolean lock = "lock".equals(value);
-        return callServiceSync("lock", lock ? "lock" : "unlock", entityId, null);
-    }
-
-    private Map<String, Object> handleThermostat(String entityId, Map<String, Object> body) {
+    private Map<String, Object> handleSetTemperature(String entityId, Map<String, Object> body) {
         if (body == null) return Map.of("error", "body required");
         Map<String, Object> data = new LinkedHashMap<>();
         if (body.get("heat") != null) data.put("temperature", body.get("heat"));
         else if (body.get("cool") != null) data.put("temperature", body.get("cool"));
+        else if (body.get("temperature") != null) data.put("temperature", body.get("temperature"));
+        if (data.isEmpty()) return Map.of("error", "heat, cool, or temperature is required");
+        return callServiceSync("climate", "set_temperature", entityId, data);
+    }
 
-        if (!data.isEmpty()) {
-            Map<String, Object> result = callServiceSync("climate", "set_temperature", entityId, data);
-            if (result.containsKey("error")) return result;
-        }
-        if (body.get("mode") != null) {
-            return callServiceSync("climate", "set_hvac_mode", entityId, Map.of("hvac_mode", body.get("mode")));
-        }
-        return Map.of("status", "ok");
+    private Map<String, Object> handleSetHvacMode(String entityId, Map<String, Object> body) {
+        Object mode = body != null ? body.get("mode") : null;
+        if (mode == null) return Map.of("error", "mode is required");
+        return callServiceSync("climate", "set_hvac_mode", entityId, Map.of("hvac_mode", mode));
+    }
+
+    private Map<String, Object> handleSetPosition(String entityId, Map<String, Object> body) {
+        Object position = body != null ? body.get("position") : null;
+        if (position == null) return Map.of("error", "position is required");
+        return callServiceSync("cover", "set_cover_position", entityId, Map.of("position", position));
+    }
+
+    private Map<String, Object> handleSetFanSpeed(String entityId, Map<String, Object> body) {
+        Object pct = body != null ? body.get("percentage") : null;
+        if (pct == null) return Map.of("error", "percentage is required");
+        return callServiceSync("fan", "set_percentage", entityId, Map.of("percentage", pct));
+    }
+
+    private Map<String, Object> handleOscillate(String entityId, Map<String, Object> body) {
+        Object value = body != null ? body.get("value") : null;
+        boolean oscillating = "on".equals(value) || Boolean.TRUE.equals(value);
+        return callServiceSync("fan", "oscillate", entityId, Map.of("oscillating", oscillating));
+    }
+
+    private Map<String, Object> handleSetDirection(String entityId, Map<String, Object> body) {
+        Object direction = body != null ? body.get("direction") : null;
+        if (direction == null) return Map.of("error", "direction is required");
+        return callServiceSync("fan", "set_direction", entityId, Map.of("direction", direction));
     }
 
     private Map<String, Object> handlePincode(String entityId, String subId, String method, Map<String, Object> body) {

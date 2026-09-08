@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Device CRUD and attribute/pincode management.
@@ -48,6 +49,27 @@ public class DeviceService {
         Map<String, Device> map = new LinkedHashMap<>();
         repo.findAll().forEach(d -> map.put(d.getId(), d));
         return map;
+    }
+
+    /**
+     * Returns every row belonging to a HAv1 device group: all rows whose "_meta"/"ha_device_id"
+     * attribute equals {@code groupId}, or — for a group-of-one (no HA device_id, or a non-"ha"
+     * legacy row) — the single row whose own id is {@code groupId}. ha_device_id isn't a real
+     * SQL column (it lives in the JSON attributes blob), so this filters in-memory; the device
+     * table is small enough (low hundreds of rows) that this is cheap, same as listAll() already
+     * loading everything.
+     */
+    public List<Device> findGroupMembers(String groupId) {
+        List<Device> members = repo.findAll().stream()
+                .filter(d -> groupId.equals(strAttr(d, "_meta", "ha_device_id")))
+                .collect(Collectors.toList());
+        if (!members.isEmpty()) return members;
+        return repo.findById(groupId).map(List::of).orElse(List.of());
+    }
+
+    private static String strAttr(Device d, String cluster, String key) {
+        Object v = d.getAttribute(cluster, key);
+        return v != null ? v.toString() : null;
     }
 
     // ── Upsert ────────────────────────────────────────────────────────────────

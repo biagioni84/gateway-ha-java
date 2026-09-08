@@ -283,7 +283,10 @@ public class HomeAssistantInterface extends TextWebSocketHandler {
         });
         log.info("Home Assistant: state cache populated — {} entities", states.size());
         if (reportHandler != null) {
-            reportHandler.onInitialStates(states.values());
+            // Off the WS I/O thread — onInitialStates() (registry bulk-load + per-entity sync)
+            // makes its own blocking sendCommandWait().join() calls, which would otherwise
+            // deadlock waiting on a response only this same thread could read.
+            eventExecutor.execute(() -> reportHandler.onInitialStates(states.values()));
         }
     }
 

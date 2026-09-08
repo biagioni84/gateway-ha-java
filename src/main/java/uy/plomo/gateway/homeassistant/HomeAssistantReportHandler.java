@@ -31,10 +31,11 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class HomeAssistantReportHandler {
 
-    private final HomeAssistantInterface haInterface;
-    private final DeviceService          deviceService;
-    private final TelemetryBuffer        telemetryBuffer;
-    private final UnhandledFrameStore    unhandledFrameStore;
+    private final HomeAssistantInterface      haInterface;
+    private final HomeAssistantEntityRegistry entityRegistry;
+    private final DeviceService               deviceService;
+    private final TelemetryBuffer             telemetryBuffer;
+    private final UnhandledFrameStore         unhandledFrameStore;
 
     @PostConstruct
     public void init() {
@@ -45,6 +46,9 @@ public class HomeAssistantReportHandler {
 
     /** Called once after get_states populates the state cache. */
     public void onInitialStates(Collection<HAState> states) {
+        // One bulk registry fetch up front so setup() below doesn't do a round-trip per entity
+        // just to find out its device/area/category.
+        entityRegistry.primeCache();
         states.forEach(this::setup);
     }
 
@@ -115,6 +119,30 @@ public class HomeAssistantReportHandler {
             dev.setName(friendlyName != null ? friendlyName : state.entityId());
         }
         applyState(dev, state);
+        applyRegistryMeta(dev, state.entityId());
+    }
+
+    /**
+     * Stashes registry info this entity's row needs for HAv1 summary grouping
+     * (GatewayApiService.getSummary()): which physical HA device it belongs to, its
+     * area, and its entity_category (diagnostic/config/primary). Stored regardless of
+     * category — grouping/filtering happens when the summary is built, not here.
+     */
+    private void applyRegistryMeta(Device dev, String entityId) {
+        String haDeviceId = entityRegistry.resolveHaDeviceId(entityId);
+        String areaId = entityRegistry.resolveAreaId(entityId);
+        String areaName = entityRegistry.resolveAreaName(areaId);
+        String category = entityRegistry.resolveEntityCategory(entityId);
+        HomeAssistantEntityRegistry.HaDeviceInfo haDevice = entityRegistry.resolveHaDeviceInfo(haDeviceId);
+
+        dev.setAttribute("_meta", "ha_device_id", haDeviceId);
+        dev.setAttribute("_meta", "area_id", areaId);
+        dev.setAttribute("_meta", "area_name", areaName);
+        dev.setAttribute("_meta", "entity_category", category);
+        if (haDevice != null) {
+            dev.setManufacturer(haDevice.manufacturer());
+            dev.setModelId(haDevice.model());
+        }
     }
 
     private void applyState(Device dev, HAState state) {
