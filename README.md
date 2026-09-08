@@ -56,9 +56,9 @@ Cloud (AWS IoT) ──MQTT5/mTLS──► MqttService
 | `homeassistant` | `HomeAssistantConnectionConfig` | Resolves HA URL/token — Supervisor addon mode vs. standalone dev mode. |
 | `homeassistant` | `HomeAssistantInterface` | Persistent WebSocket client to Home Assistant's Core API (auth handshake, `subscribe_events`, `call_service`, `get_states`). |
 | `homeassistant` | `HomeAssistantReportHandler` | Processes `state_changed` events, updates the device cache, forwards MQTT telemetry. |
-| `homeassistant` | `HomeAssistantController` | Device summary view + command dispatch (on/off/lock/level/thermostat/pincode + generic service passthrough). |
+| `homeassistant` | `HomeAssistantController` | Groups entities into HAv1 device summaries (status/actions) and dispatches an action against whichever entity in the group provides it. |
 | `homeassistant` | `HomeAssistantTypeMapper` | Maps an HA entity's domain/device_class to the gateway's logical device `type`. |
-| `homeassistant` | `HomeAssistantEntityRegistry` | Resolves which HA integration (`zwave_js`, `zha`, `matter`, ...) owns a given entity. |
+| `homeassistant` | `HomeAssistantEntityRegistry` | Resolves which HA integration owns an entity, plus (bulk-cached) its device_id, area, entity_category, and the device registry's manufacturer/model/area. |
 | `homeassistant.lock` | `LockCodeProvider` / `HomeAssistantLockCodeProvider` | Lock control + PIN code management, routed per owning integration. |
 | `homeassistant.camera` | `HomeAssistantCameraController` / `HomeAssistantCameraService` | Camera summary/commands and snapshot proxying via HA's REST API. |
 | `camera` | *(none — removed)* | Direct go2rtc integration was removed; cameras are Home Assistant `camera.*` entities now. |
@@ -502,44 +502,60 @@ batch as:
 
 ---
 
-## Device summary format
+## Device summary format (HAv1)
 
-`GET /summary` returns a list of devices. Each device has a consistent flat structure:
+`GET /summary` groups Home Assistant **entities into physical devices** — a device with several
+entities (e.g. a multi-sensor reporting occupancy + illuminance + battery + tamper as four
+separate HA entities) appears as **one** entry, not four. The top-level response carries
+`"version": "HAv1"` so a client can tell this shape apart from anything older. Entities with no HA
+device_id (helpers, some templates) get their own group of one, keyed by their row id instead of
+a device_id.
 
 ```json
 {
-  "id":             "uuid",
-  "protocol":       "ha",
-  "name":           "Front Door Lock",
-  "node":           "lock.front_door",
-  "type":           "lock" | "switch" | "dimmer" | "thermostat" | "cover" | "fan" |
-                     "sensor-contact" | "sensor-occupancy" | "sensor-temperature" |
-                     "sensor-humidity" | "sensor-illuminance" | "sensor-battery" |
-                     "sensor-binary" | "sensor-generic" | "camera",
-  "manufacturer":   "ASSA ABLOY",
-  "manufacturerId": null,
-  "modelId":        null,
-  "available":      true,
-  "status":         "locked" | "unlocked" | "on" | "off" | 85 | null,
-  "battery":        null
+  "gw_id": "...", "fw_version": "0.1", "version": "HAv1", "time": "...", "timezone": "...",
+  "devices": {
+    "<ha_device_id or fallback>": {
+      "id":           "<ha_device_id or fallback>",
+      "protocol":     "ha",
+      "name":         "Front Door Lock",
+      "type":         "lock",
+      "manufacturer": "ASSA ABLOY",
+      "modelId":      "YRD226",
+      "areaId":       "front_entry",
+      "areaName":     "Front Entry",
+      "available":    true,
+      "status":  { "lock": "locked", "battery": "63" },
+      "actions": ["lock", "unlock", "pincode"]
+    }
+  }
 }
 ```
 
-- `node`: the Home Assistant entity_id, e.g. `lock.front_door`.
-- `type`: inferred from the entity's domain and (for `binary_sensor`/`sensor`) its
-  `device_class` attribute — see `HomeAssistantTypeMapper`. `cover`, `fan`, and the
-  `sensor-*` types beyond `sensor-contact`/`sensor-occupancy`/`sensor-temperature` are new
-  additions from the Home Assistant migration and may need mobile-app/cloud-side confirmation
-  if UI logic is keyed on this string.
-- `status`: lock/switch pass through Home Assistant's own state string as-is (`"locked"`,
-  `"unlocked"`, `"on"`, `"off"`, ...); dimmer brightness is normalized from HA's native 0–255
-  scale to the pre-existing 0–99 convention; camera is `"streaming"`/`"offline"`.
-- `manufacturer`/`manufacturerId`/`modelId`: not yet resolved from Home Assistant's device
-  registry — currently whatever was last stored on the row, `null` for new entities. A future
-  improvement could resolve these via `config/device_registry/get`.
-- `battery`: not yet resolved — Home Assistant typically exposes battery level as a *separate*
-  `sensor.*_battery` entity linked to the same physical device, not as an attribute on the
-  primary entity, so resolving it needs a device-registry cross-reference not yet implemented.
+- **`type`/`available`/`name`**: taken from the group's "primary" entity — picked by domain
+  priority (`lock > climate > switch > light > cover > fan > camera > binary_sensor > sensor`),
+  since Home Assistant itself has no "primary entity" concept for a multi-entity device. Ties
+  within the same domain prefer a non-`diagnostic`/`config` entity, then break alphabetically by
+  `entity_id` for determinism.
+- **`status`**: one entry per entity in the group, passed through Home Assistant's own state
+  string as-is. Keyed by a short label (usually the `device_class`, e.g. `battery`, `illuminance`,
+  `temperature`; the domain itself for non-sensor entities, e.g. `lock`, `climate`). **If two
+  entities in the same group produce the same label** (real example: a multi-sensor with two
+  `occupancy`-classed binary sensors), both are kept — sorted by `entity_id` and suffixed `_1`,
+  `_2`, ... instead of one silently overwriting the other.
+- **`actions`**: what you can `POST /:dev/{action}` on this device — computed from the real HA
+  capability attributes of whichever entities are in the group (`supported_features`,
+  `supported_color_modes`), not a fixed list per type — e.g. `set_level` only appears for lights
+  that actually support brightness. Same `_1`/`_2` suffixing as `status` if two entities in a
+  group offer the same action (rare, but see `nspanel Relay 1` on a real instance: three switch
+  entities on one device produce `turn_on_1`/`turn_on_2`/`turn_on_3`, etc.). Read-only domains
+  (`sensor`, `binary_sensor`) never contribute actions. See `DeviceController`'s command endpoint
+  docs (Swagger) for the request shape each action expects.
+- **`manufacturer`/`modelId`/`areaId`/`areaName`**: resolved from Home Assistant's device/area
+  registries at sync time (`HomeAssistantEntityRegistry.primeCache()`), cached until the next
+  resync — not live-refreshed on every request.
+- Cameras keep their own existing summary shape (`HomeAssistantCameraController`), unaffected by
+  the grouping above.
 
 ---
 
@@ -564,10 +580,15 @@ raw `attributes` object Home Assistant reports for each entity's state.
   every reconnect), exponential backoff (5s–300s, jittered), and a 5-minute watchdog — the same
   reconnection shape used throughout this project's WebSocket clients.
 - On connect: subscribes to `state_changed` events, then fetches the full state via
-  `get_states`. `HomeAssistantReportHandler` turns each entity into (or updates) a `Device` row;
-  only entities in a domain `HomeAssistantTypeMapper` recognizes (`lock`, `switch`, `light`,
-  `climate`, `camera`, `cover`, `fan`, `binary_sensor`, `sensor`) become gateway devices —
-  automations, scripts, zones, persons, and other non-device entities are skipped.
+  `get_states` — **dispatched off the WebSocket's own I/O thread** (via the shared
+  `gatewayExecutor`), since the initial sync makes its own blocking Home Assistant calls
+  (`HomeAssistantEntityRegistry.primeCache()`) that would otherwise deadlock waiting on a
+  response only that same thread could read. `HomeAssistantReportHandler` turns each entity into
+  (or updates) a `Device` row (still one row per HA entity — see [Device summary format
+  (HAv1)](#device-summary-format-hav1) for how these get grouped back into physical devices at
+  read time); only entities in a domain `HomeAssistantTypeMapper` recognizes (`lock`, `switch`,
+  `light`, `climate`, `camera`, `cover`, `fan`, `binary_sensor`, `sensor`) become gateway devices
+  — automations, scripts, zones, persons, and other non-device entities are skipped.
   Only Z-Wave JS is verified end-to-end for pincode management; the WebSocket API shapes,
   Z-Wave JS's inclusion/exclusion commands, and the ZHA/Matter gaps documented above were all
   checked against Home Assistant's own source and documentation, not assumed.
