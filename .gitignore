@@ -13,6 +13,7 @@ provisioned.creds
 gateway.db
 gateway.db-shm
 gateway.db-wal
+gateway.serial
 *.pem
 *.key
 *.p12

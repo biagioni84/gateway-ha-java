@@ -64,7 +64,7 @@ Cloud (AWS IoT) ──MQTT5/mTLS──► MqttService
 | `camera` | *(none — removed)* | Direct go2rtc integration was removed; cameras are Home Assistant `camera.*` entities now. |
 | `device` | `DeviceService` | CRUD for devices, attributes, pincodes. Fully protocol-agnostic. |
 | `sequence` | `SequenceService` | CRUD for named device command sequences. |
-| `platform` | `PlatformService` | Serial number, timezone, SSH public key. |
+| `platform` | `PlatformService` | Serial number (provisioned → `/proc/cpuinfo` → persisted UUID fallback), timezone, SSH public key. |
 | `config` | `AppConfig` | Loads `provisioned.creds` (JSON). |
 
 ---
@@ -159,6 +159,7 @@ All configuration lives in `src/main/resources/application.properties`. Override
 | `gateway.auth.jwt.secret` | *(blank)* | JWT signing secret — random generated on startup if blank |
 | `gateway.auth.jwt.expiry.hours` | `24` | JWT token lifetime in hours |
 | `gateway.creds.path` | `./provisioned.creds` | Path to provisioning credentials |
+| `gateway.serial.path` | `./gateway.serial` | Last-resort `gw_id` fallback — a UUID generated once and persisted here, used only when `provisioned.creds` has no `serialNumber` and `/proc/cpuinfo` has no `Serial` line (i.e. anything that isn't a Raspberry Pi/Broadcom board) |
 | `gateway.deployment.mode` | `bare-metal` | Set to `container` (done automatically by the Dockerfile) to disable OTA — see `OTA.md` |
 
 ### Home Assistant connection modes

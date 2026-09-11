@@ -9,8 +9,12 @@ RUN gradle build --no-daemon -x test
 
 # Pure-JVM app — the same image works for amd64 and aarch64 under buildx with no special handling.
 FROM eclipse-temurin:17-jre
+# openssh-client: PlatformService.createReverseTunnel() shells out to ssh.
+# jq: run.sh parses /data/options.json.
+# procps: PlatformService.listRunningTunnels()/stopRunningTunnels() shell out to ps — the base
+# JRE image doesn't include it, so without this those always returned an empty list.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssh-client jq \
+    && apt-get install -y --no-install-recommends openssh-client jq procps \
     && rm -rf /var/lib/apt/lists/*
 
 # /data is the persistent-storage convention for HA add-ons (mapped via config.yaml's "map: data:rw")
