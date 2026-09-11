@@ -2,10 +2,14 @@ package uy.plomo.gateway.platform;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import uy.plomo.gateway.config.AppConfig;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -24,17 +28,57 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class PlatformService {
 
+    private final AppConfig appConfig;
+
+    @Value("${gateway.serial.path:./gateway.serial}")
+    private String serialPath;
+
+    /**
+     * Resolution order: (1) provisioned.creds' own serialNumber, if the provisioning flow set
+     * one — the authoritative source when present; (2) /proc/cpuinfo's "Serial" line, which is
+     * a real device identifier on Raspberry Pi/Broadcom SoC hardware but simply doesn't exist on
+     * x86 (confirmed: this always fell through to "unknown" in container/HAOS-on-NUC testing);
+     * (3) a UUID generated once and persisted next to gateway.db, so gw_id stays stable across
+     * restarts even with neither of the above.
+     */
     public String getSerialNumber() {
+        String provisioned = appConfig.getCreds().getSerialNumber();
+        if (provisioned != null && !provisioned.isBlank()) return provisioned;
+
+        String cpuSerial = readCpuinfoSerial();
+        if (cpuSerial != null) return cpuSerial;
+
+        return persistedFallbackSerial();
+    }
+
+    private String readCpuinfoSerial() {
         try {
-            return java.nio.file.Files.readAllLines(java.nio.file.Path.of("/proc/cpuinfo")).stream()
+            return Files.readAllLines(Path.of("/proc/cpuinfo")).stream()
                     .filter(line -> line.startsWith("Serial"))
                     .findFirst()
-                    .map(line -> { String[] p = line.split(":\\s*", 2); return p.length > 1 ? p[1].trim() : line.trim(); })
-                    .orElse("unknown");
+                    .map(line -> { String[] p = line.split(":\\s*", 2); return p.length > 1 ? p[1].trim() : null; })
+                    .filter(s -> s != null && !s.isBlank())
+                    .orElse(null);
         } catch (Exception e) {
-            log.warn("getSerialNumber failed", e);
+            return null;
         }
-        return "unknown";
+    }
+
+    private String persistedFallbackSerial() {
+        Path path = Path.of(serialPath);
+        try {
+            if (Files.exists(path)) {
+                String existing = Files.readString(path).trim();
+                if (!existing.isBlank()) return existing;
+            }
+            String generated = UUID.randomUUID().toString();
+            Files.writeString(path, generated);
+            log.info("getSerialNumber: no provisioned/cpuinfo serial — generated and persisted {}", generated);
+            return generated;
+        } catch (Exception e) {
+            log.warn("getSerialNumber: failed to read/persist fallback serial at '{}'", serialPath, e);
+            return "unknown";
+        }
     }
 
     public String getTimezone() {
